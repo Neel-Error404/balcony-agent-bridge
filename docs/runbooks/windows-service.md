@@ -21,6 +21,11 @@ Run `Install-BridgeService.ps1 -WhatIf` before installation. The real
 installation writes only to the machine-local ProgramData directory and
 registers the `BalconyAgentBridge` service.
 
+The installer grants the elevated installing user `Modify` access only on the
+ProgramData `data` directory so the local MCP server and Windows service can
+share the SQLite inbox and outbox. Service configuration, credentials, and
+logs remain outside that writable boundary.
+
 The generated service configuration is machine-private because it contains the
 local Azure namespace endpoint. Never commit it or copy it through Obsidian.
 

@@ -130,6 +130,22 @@ if ($PSCmdlet.ShouldProcess(
         $logDirectory
     ) | Out-Null
 
+    $mcpUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $dataAcl = Get-Acl -LiteralPath $dataDirectory
+    $dataAcl.SetAccessRule(
+        (New-Object Security.AccessControl.FileSystemAccessRule(
+            $mcpUser.User,
+            [Security.AccessControl.FileSystemRights]::Modify,
+            (
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [Security.AccessControl.InheritanceFlags]::ObjectInherit
+            ),
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        ))
+    )
+    Set-Acl -LiteralPath $dataDirectory -AclObject $dataAcl
+
     Copy-Item -LiteralPath $WinSwExecutable `
         -Destination $serviceExecutable -Force
 

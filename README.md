@@ -26,7 +26,7 @@ Current per-item and scenario estimates are recorded in `docs/costs.md`.
 
 ## Current Status
 
-The approved Azure Service Bus topology is provisioned. All 53 tests, type
+The approved Azure Service Bus topology is provisioned. All 54 tests, type
 checking, production build, Bicep compilation, dependency audit, and the
 compiled MCP smoke test pass.
 
@@ -37,10 +37,16 @@ topic send, filtered subscription receive, PeekLock completion, durable
 SQLite processing, and all nine MCP tools are verified. Codex has the local
 MCP registration without Azure credentials.
 
-The remaining local gate is Windows service installation, which requires an
-elevated PowerShell session and an owner-approved pinned WinSW executable. The
-real SYS-B consume-and-reply round trip remains open and must use the exact
-owner-approved Git revision supplied with the handoff.
+The SYS-A Windows service is installed with the owner-approved WinSW v2.12.0
+x64 wrapper, starts automatically, and reports a healthy heartbeat. Restart,
+forced child-process termination, native MCP-to-service delivery, live
+idempotency, and offline pending-work recovery pass. Codex and the service
+share the ProgramData SQLite database through a least-privilege data-directory
+ACL.
+
+The remaining gates are SYS-B service installation from the next exact
+published revision, a reverse SYS-B-to-SYS-A reply, and final two-system reboot
+and recovery acceptance.
 
 ## Local Verification
 

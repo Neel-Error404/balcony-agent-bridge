@@ -9,7 +9,7 @@
 - Git publication: approved; exact revision is supplied with the handoff
 - SYS-A host: physical Windows 11 machine
 - Azure Arc: not installed and not required by the selected design
-- Windows service: not installed
+- Windows service: installed, automatic, and running
 - Current PowerShell session: not elevated
 
 ## Local Verification
@@ -21,20 +21,20 @@
 | Production build | PASS |
 | Foundation tests | PASS, 17 |
 | Component tests | PASS, 16 |
-| Integration tests | PASS, 6 |
+| Integration tests | PASS, 7 |
 | Workflow tests | PASS, 1 |
 | Recovery tests | PASS, 3 |
 | Security tests | PASS, 10 |
-| Aggregate tests | PASS, 53 |
+| Aggregate tests | PASS, 54 |
 | Compiled MCP smoke | PASS, 9 tools |
 | PowerShell syntax | PASS |
 | Main Bicep compilation | PASS |
 | Routing-repair Bicep compilation | PASS |
 | Codex MCP registration | PASS, enabled stdio server |
 
-The Codex MCP registration contains only the SYS-A declaration and local
-SQLite path. It contains no Azure endpoint, tenant, client, certificate, token,
-or connection-string value.
+The Codex MCP registration contains only the SYS-A declaration and shared
+ProgramData SQLite path. It contains no Azure endpoint, tenant, client,
+certificate, token, or connection-string value.
 
 ## Azure State
 
@@ -87,10 +87,19 @@ attached to an unrelated Azure VM.
 | Hardened MCP status | PASS |
 | Bridge stdout/stderr leakage | PASS, zero output in final live run |
 | Broker delivery to SYS-B subscription | PASS |
+| Windows service automatic start type | PASS |
+| Windows service restart | PASS |
+| Forced child-process recovery | PASS |
+| Native MCP and service shared database | PASS |
+| Live duplicate idempotency | PASS |
+| Offline pending-work recovery | PASS |
 
-The final verification bridge process was stopped after the test. The local
-SQLite database and Codex MCP registration remain available, but Azure
-transport is not always-on until the Windows service is installed.
+The SYS-A bridge is now an always-on Windows service. WinSW v2.12.0 x64 was
+downloaded from the official release and verified against the owner-approved
+SHA-256 before installation. The service and local MCP server share the
+ProgramData database; only the elevated installing user receives `Modify`
+access to the data directory. Reboot startup remains to be observed during the
+final two-system acceptance sequence.
 
 ## Security Hardening
 
@@ -104,10 +113,8 @@ transport is not always-on until the Windows service is installed.
 
 ## Remaining Gates
 
-1. Owner supplies an approved pinned WinSW executable and checksum.
-2. Owner opens elevated PowerShell for SYS-A service installation.
-3. SYS-B installs from the exact published revision supplied with the handoff,
-   uses its attached managed identity,
-   and runs all 53 tests.
-4. SYS-A and SYS-B complete the real two-machine consume, reply, duplicate,
-   restart, and crash-recovery acceptance sequence.
+1. Publish the ProgramData data-directory ACL correction.
+2. SYS-B installs from the next exact published revision, uses its attached
+   managed identity, and runs all 54 tests.
+3. SYS-B sends a reverse reply that the persistent SYS-A service receives.
+4. SYS-A and SYS-B complete final reboot and two-system recovery acceptance.

@@ -17,19 +17,26 @@ During rotation, append the new public certificate, verify the new private PEM
 on SYS-A, update the service configuration, restart and test, then remove the
 old public certificate.
 
-## Service Installation Gate
+## Windows Service
 
-The current session is not elevated and no approved WinSW executable is
-available. The owner must:
+The owner-approved WinSW v2.12.0 x64 wrapper is installed machine-locally
+after SHA-256 verification. `BalconyAgentBridge` starts automatically and runs
+in explicit `client_certificate` mode.
 
-1. Supply a version-pinned WinSW executable and verified checksum.
-2. Open an elevated PowerShell session.
-3. Set only process-scoped `BALCONY_SYSTEM_ID=SYS-A`.
-4. Run `Install-BridgeService.ps1` with the `ClientCertificate` parameter set
-   and machine-local Azure values.
-5. Start, stop, restart, and terminate the service process to verify recovery.
-6. Confirm the service uses ProgramData SQLite/log paths and emits only stable
-   error codes.
+The service uses ProgramData SQLite and log paths. The local MCP server uses
+the same SQLite database. The installer grants the elevated installing user
+`Modify` access only on the data directory so the MCP process can create WAL
+files and enqueue work; service configuration, credentials, and logs remain
+outside that writable boundary.
+
+Verified service behavior:
+
+1. Healthy startup and heartbeat.
+2. Stop, start, and restart.
+3. Automatic replacement after forced child-process termination.
+4. Native MCP enqueue followed by automatic Azure delivery.
+5. Duplicate idempotency with one durable delivery.
+6. Pending work preserved while stopped and delivered after restart.
 
 Never put the private PEM, service XML, Azure identifiers, namespace hostname,
 or generated logs in Git or Obsidian.
@@ -38,5 +45,5 @@ or generated logs in Git or Obsidian.
 
 SYS-A certificate authentication, topic send, own-subscription receive,
 PeekLock completion, durable outbox/inbox processing, atomic claim renewal,
-and MCP operation are verified. Always-on operation and reboot recovery remain
-pending until the Windows service is installed.
+MCP operation, and always-on service recovery are verified. Reboot startup and
+the final reverse SYS-B-to-SYS-A reply remain pending.

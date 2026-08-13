@@ -42,6 +42,12 @@ describe("Windows service installation contract", () => {
     expect(serviceTemplate).toContain(
       "__AUTH_ENVIRONMENT__",
     );
+    expect(installer).toContain(
+      "[Security.AccessControl.FileSystemRights]::Modify",
+    );
+    expect(installer).toContain(
+      "Set-Acl -LiteralPath $dataDirectory",
+    );
   });
 
   it("binds installation to the declared machine and Azure hostname", () => {
