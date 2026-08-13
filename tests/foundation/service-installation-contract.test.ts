@@ -11,7 +11,7 @@ const repositoryRoot = path.resolve(
 const installer = fs.readFileSync(
   path.join(repositoryRoot, "scripts", "Install-BridgeService.ps1"),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const serviceTemplate = fs.readFileSync(
   path.join(
     repositoryRoot,

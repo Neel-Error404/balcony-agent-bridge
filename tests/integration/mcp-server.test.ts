@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AgentBridgeService } from "../../src/application/agent-bridge-service.js";
 import type { BridgeConfig } from "../../src/config.js";
+import { createEnvelope } from "../../src/contracts/envelope.js";
 import { createMcpServer } from "../../src/mcp/server.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
 
@@ -81,6 +82,163 @@ describe("MCP server", () => {
     expect(database.getStatus().outbox.pending).toBe(1);
   });
 
+  it("executes the complete inbox lifecycle through native MCP tools", async () => {
+    const retryMessage = incomingEnvelope("mcp-lifecycle-retry");
+    database.persistIncoming(retryMessage, 1);
+
+    const list = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_list_inbox",
+        arguments: { limit: 10, states: ["available"] },
+      }),
+    ) as { items: Array<{ message_id: string; state: string }> };
+    expect(list.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message_id: retryMessage.message_id,
+          state: "available",
+        }),
+      ]),
+    );
+
+    const read = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_read",
+        arguments: { message_id: retryMessage.message_id },
+      }),
+    ) as {
+      envelope: {
+        message_id: string;
+        payload: { subject: string };
+      };
+      state: string;
+    };
+    expect(read.envelope.message_id).toBe(retryMessage.message_id);
+    expect(read.envelope.payload.subject).toBe("MCP lifecycle");
+    expect(read.state).toBe("available");
+
+    const firstClaim = await claimMessage(retryMessage.message_id);
+    const renewed = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_renew_claim",
+        arguments: {
+          message_id: retryMessage.message_id,
+          consumer_id: "mcp-consumer",
+          claim_token: firstClaim.claim_token,
+          lease_seconds: 120,
+        },
+      }),
+    ) as { message_id: string; claim_until_utc: string };
+    expect(renewed.message_id).toBe(retryMessage.message_id);
+    expect(Date.parse(renewed.claim_until_utc)).toBeGreaterThan(Date.now());
+
+    const retried = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_fail",
+        arguments: {
+          message_id: retryMessage.message_id,
+          consumer_id: "mcp-consumer",
+          claim_token: firstClaim.claim_token,
+          action: "retry",
+          reason: "Synthetic retry verification.",
+        },
+      }),
+    ) as { message_id: string; state: string };
+    expect(retried).toEqual({
+      message_id: retryMessage.message_id,
+      state: "available",
+    });
+
+    const secondClaim = await claimMessage(retryMessage.message_id);
+    const reply = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_reply",
+        arguments: {
+          original_message_id: retryMessage.message_id,
+          idempotency_key: "mcp-lifecycle-reply",
+          kind: "task_result",
+          payload: {
+            subject: "MCP lifecycle reply",
+            body: "The native MCP lifecycle completed.",
+            evidence: [],
+          },
+        },
+      }),
+    ) as { accepted: boolean; state: string };
+    expect(reply.accepted).toBe(true);
+    expect(reply.state).toBe("pending");
+
+    const completed = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_complete",
+        arguments: {
+          message_id: retryMessage.message_id,
+          consumer_id: "mcp-consumer",
+          claim_token: secondClaim.claim_token,
+        },
+      }),
+    ) as { message_id: string; state: string };
+    expect(completed.state).toBe("processed");
+
+    const completedAgain = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_complete",
+        arguments: {
+          message_id: retryMessage.message_id,
+          consumer_id: "mcp-consumer",
+          claim_token: secondClaim.claim_token,
+        },
+      }),
+    ) as { state: string };
+    expect(completedAgain.state).toBe("processed");
+
+    const rejectMessage = incomingEnvelope("mcp-lifecycle-reject");
+    database.persistIncoming(rejectMessage, 1);
+    const rejectedClaim = await claimMessage(rejectMessage.message_id);
+    const rejected = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_fail",
+        arguments: {
+          message_id: rejectMessage.message_id,
+          consumer_id: "mcp-consumer",
+          claim_token: rejectedClaim.claim_token,
+          action: "reject",
+          reason: "Synthetic rejection verification.",
+        },
+      }),
+    ) as { state: string };
+    expect(rejected.state).toBe("rejected");
+    expect(database.getStatus().inbox).toMatchObject({
+      processed: 1,
+      rejected: 1,
+    });
+    expect(database.getStatus().outbox.pending).toBe(1);
+
+    async function claimMessage(messageId: string): Promise<{
+      claim_token: string;
+    }> {
+      const claim = toolOutput(
+        await client.callTool({
+          name: "agent_bridge_claim",
+          arguments: {
+            consumer_id: "mcp-consumer",
+            limit: 1,
+            lease_seconds: 60,
+          },
+        }),
+      ) as {
+        count: number;
+        items: Array<{
+          envelope: { message_id: string };
+          claim_token: string;
+        }>;
+      };
+      expect(claim.count).toBe(1);
+      expect(claim.items[0]?.envelope.message_id).toBe(messageId);
+      return claim.items[0]!;
+    }
+  });
+
   it("returns an actionable tool error for unsafe payloads", async () => {
     const response = await client.callTool({
       name: "agent_bridge_send",
@@ -133,3 +291,30 @@ describe("MCP server", () => {
     expect(JSON.stringify(status.content)).not.toContain("private-host");
   });
 });
+
+function incomingEnvelope(idempotencyKey: string) {
+  return createEnvelope({
+    idempotencyKey,
+    originSystem: "SYS-B",
+    targetSystem: "SYS-A",
+    kind: "task_request",
+    streamId: "mcp-lifecycle",
+    payload: {
+      subject: "MCP lifecycle",
+      body: "Exercise the native coding-agent tool boundary.",
+      evidence: [],
+    },
+    expiresAtUtc: "2026-08-20T12:00:00.000Z",
+    now: new Date("2026-08-13T12:00:00.000Z"),
+  });
+}
+
+function toolOutput(response: unknown): Record<string, unknown> {
+  const result = response as {
+    isError?: boolean;
+    structuredContent?: Record<string, unknown>;
+  };
+  expect(result.isError).not.toBe(true);
+  expect(result.structuredContent).toBeDefined();
+  return result.structuredContent!;
+}
