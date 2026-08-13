@@ -1,0 +1,40 @@
+{
+  "name": "balcony-agent-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable MCP bridge for secret-safe agent communication between SYS-A and SYS-B",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:foundation": "vitest run tests/foundation",
+    "test:component": "vitest run tests/component",
+    "test:integration": "vitest run tests/integration",
+    "test:workflow": "vitest run tests/workflow",
+    "test:recovery": "vitest run tests/recovery",
+    "test:security": "vitest run tests/security",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "start:mcp": "node dist/mcp/index.js",
+    "start:bridge": "node dist/bridge/index.js",
+    "bridge:status": "node dist/cli/index.js status"
+  },
+  "dependencies": {
+    "@azure/core-auth": "1.11.0",
+    "@azure/identity": "4.13.1",
+    "@azure/service-bus": "7.9.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "better-sqlite3": "13.0.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "24.10.1",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

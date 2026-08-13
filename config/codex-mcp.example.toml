@@ -1,0 +1,7 @@
+[mcp_servers.balcony-agent-bridge]
+command = "node"
+args = ["D:\\Work_Projects\\balcony-agent-bridge\\dist\\mcp\\index.js"]
+env = {
+  BALCONY_SYSTEM_ID = "SYS-A",
+  BALCONY_BRIDGE_DB_PATH = "C:\\ProgramData\\Balcony\\AgentBridge\\data\\bridge.sqlite3"
+}

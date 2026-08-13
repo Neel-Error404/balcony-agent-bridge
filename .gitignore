@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+logs/
+tmp/
+*.local.json
+infra/*.parameters.json
+infra/*.bicepparam
+!infra/example.parameters.json

@@ -1,0 +1,27 @@
+<service>
+  <id>BalconyAgentBridge</id>
+  <name>Balcony Agent Bridge</name>
+  <description>Durable Azure Service Bus bridge for local coding agents.</description>
+  <executable>__NODE_EXECUTABLE__</executable>
+  <arguments>__BRIDGE_ENTRYPOINT__</arguments>
+  <workingdirectory>__REPOSITORY_ROOT__</workingdirectory>
+  <env name="BALCONY_SYSTEM_ID" value="__SYSTEM_ID__" />
+  <env name="BALCONY_BRIDGE_DB_PATH" value="__DATABASE_PATH__" />
+  <env name="BALCONY_SERVICEBUS_NAMESPACE" value="__SERVICEBUS_NAMESPACE__" />
+  <env name="BALCONY_SERVICEBUS_TOPIC" value="__TOPIC_NAME__" />
+  <env name="BALCONY_SERVICEBUS_SUBSCRIPTION" value="__SUBSCRIPTION_NAME__" />
+__AUTH_ENVIRONMENT__
+  <logpath>__LOG_PATH__</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyyMMdd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+    <zipOlderThanNumDays>7</zipOlderThanNumDays>
+    <zipDateFormat>yyyyMMdd</zipDateFormat>
+    <keepFiles>30</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+</service>
