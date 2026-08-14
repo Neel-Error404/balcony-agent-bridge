@@ -82,6 +82,16 @@ After vault onboarding and final validation, SYS-A also sent status addendum
 `391674d6-ccca-44f2-8902-3840a13160b8`. Azure acknowledged the addendum at
 `2026-08-14T06:59:20.981Z`. SYS-B should read both messages together.
 
+After owner approval, SYS-A published implementation revision
+`882cc8615327faf45563e3e9c7210acbb2e1e91d` on branch
+`codex/coordination-dispatcher`. SYS-A then sent SYS-B release task
+`66ad844f-3e63-4c93-8b1b-0dfbccd290f7` in conversation
+`9a370864-c16c-4cc4-8ea6-8f2053318a58`. The live bridge marked the task sent at
+`2026-08-14T09:30:58.514Z`. The task requires exact-SHA checkout, the full
+95-test ladder, typecheck, build, production audit, eleven-tool smoke, and a
+secret-safe `accept`, `amend`, or `reject` reply. Automatic dispatcher startup
+remains prohibited.
+
 ## Remaining Gates
 
 1. Restart `BalconyAgentBridge` from an elevated PowerShell session so the
@@ -91,6 +101,5 @@ After vault onboarding and final validation, SYS-A also sent status addendum
 3. Treat the new coordination tools as source-verified but not operationally
    deployed until the installed SYS-A service/MCP and SYS-B checkout use an
    owner-approved exact revision.
-4. Do not stage, commit, push, or ask SYS-B to pull the dispatcher or
-   coordination lane without separate owner approval and an exact published
-   revision.
+4. Have SYS-B verify implementation SHA `882cc8615327faf45563e3e9c7210acbb2e1e91d`
+   and return its bridge acceptance result before merge or service deployment.
