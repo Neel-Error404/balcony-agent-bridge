@@ -96,12 +96,29 @@ subscription, so the exact dead-letter reason remains a SYS-B-only check.
 
 ## Remaining Gates
 
-1. Obtain explicit Git approval and publish one exact shared release containing
-   the coordination schema, independent transport lanes, and worker lock.
-2. Apply that exact release on SYS-B and run the runtime safety check.
-3. Run a fresh unique SYS-A to SYS-B request/result round trip.
+1. Apply release `2f3f58f6cf8fbb33742ca855dd4ad3fffadc4934` on SYS-B and
+   run the runtime safety check with the dispatcher still disabled.
+2. Prove that a new coordination request persists in the canonical SYS-B inbox
+   instead of entering the dead-letter queue.
+3. Run a foreground read-only dispatcher request/result round trip and at least
+   two serialized follow-up turns before approving automatic startup.
 4. Add a durable remote-receipt state so broker `sent` is never presented as
    end-to-end completion.
+
+## Release Publication
+
+Owner approval `APPROVE_COMMIT_AND_PUSH_BRIDGE_RELEASE_TO_MAIN` was received on
+2026-08-15 IST. SYS-A committed the reviewed 101-test candidate as
+`2f3f58f6cf8fbb33742ca855dd4ad3fffadc4934` and fast-forwarded both `main` and
+`codex/coordination-dispatcher` to that exact revision. GitHub remote refs were
+read back and matched the local SHA. The merged `main` tree then passed all 101
+tests again, plus typecheck, production build, thirteen-tool MCP smoke, and a
+zero-vulnerability production dependency audit.
+
+Publication makes the compatible source installable; it does not itself deploy
+SYS-B or activate either dispatcher. Automatic agent execution and multi-turn
+discussion remain unaccepted until the SYS-B upgrade and foreground acceptance
+sequence above completes.
 
 ## Follow-Up Activation
 
