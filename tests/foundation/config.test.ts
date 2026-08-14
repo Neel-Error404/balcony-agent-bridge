@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   loadConfig,
+  loadReadOnlyDispatcherConfig,
   requireServiceBusNamespace,
 } from "../../src/config.js";
 
@@ -73,5 +74,37 @@ describe("bridge configuration", () => {
       "22222222-2222-4222-8222-222222222222",
     );
     expect(config.azureClientCertificatePath).toContain("sys-a.pem");
+  });
+
+  it("loads an explicit read-only dispatcher configuration", () => {
+    const config = loadReadOnlyDispatcherConfig({
+      BALCONY_SYSTEM_ID: "SYS-A",
+      BALCONY_BRIDGE_DB_PATH: "D:\\bridge.sqlite3",
+      BALCONY_DISPATCHER_PROJECTS_PATH:
+        "D:\\local\\dispatcher-projects.json",
+      BALCONY_CODEX_EXECUTABLE: "D:\\tools\\codex.ps1",
+      BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+      BALCONY_DISPATCHER_CODEX_HOME: "D:\\local\\codex-home",
+      BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
+      BALCONY_DISPATCHER_POLL_INTERVAL_MS: "1500",
+      BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS: "120",
+      BALCONY_DISPATCHER_MAX_OUTPUT_BYTES: "32000",
+    });
+
+    expect(config.systemId).toBe("SYS-A");
+    expect(config.peerSystemId).toBe("SYS-B");
+    expect(config.pollIntervalMs).toBe(1500);
+    expect(config.defaultTimeoutSeconds).toBe(120);
+    expect(config.maxOutputBytes).toBe(32000);
+    expect(config.codexExecutableSha256).toBe("a".repeat(64));
+    expect(config.trustedPath).toBe("C:\\trusted-node");
+  });
+
+  it("fails closed when dispatcher execution paths are not declared", () => {
+    expect(() =>
+      loadReadOnlyDispatcherConfig({
+        BALCONY_SYSTEM_ID: "SYS-A",
+      }),
+    ).toThrow(/BALCONY_DISPATCHER_PROJECTS_PATH/);
   });
 });

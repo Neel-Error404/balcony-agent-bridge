@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodError, z } from "zod";
 
 import { AgentBridgeService } from "../application/agent-bridge-service.js";
+import { CoordinationIntentSchema } from "../contracts/coordination.js";
 import {
   MESSAGE_KINDS,
   MessageKindSchema,
@@ -71,6 +72,68 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
             : {}),
         }),
       ),
+  );
+
+  server.registerTool(
+    "agent_bridge_ask_agent",
+    {
+      title: "Ask Peer Project Agent",
+      description:
+        "Create a durable, read-only project question for the configured peer system. Returns a task ID immediately; use agent_bridge_get_result to observe delivery and retrieve the eventual answer.",
+      inputSchema: {
+        idempotency_key: z.string().trim().min(1).max(128),
+        project_id: z.string().trim().min(1).max(120),
+        subject: z.string().trim().min(1).max(200),
+        request: z.string().trim().min(1).max(12_000),
+        intent: CoordinationIntentSchema.default("question"),
+        timeout_seconds: z.number().int().min(30).max(600).default(300),
+        conversation_id: z.string().uuid().optional(),
+        expires_at_utc: z.string().datetime({ offset: true }).optional(),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input) =>
+      toolResult(() =>
+        service.askAgent({
+          idempotencyKey: input.idempotency_key,
+          projectId: input.project_id,
+          subject: input.subject,
+          request: input.request,
+          intent: input.intent,
+          timeoutSeconds: input.timeout_seconds,
+          ...(input.conversation_id
+            ? { conversationId: input.conversation_id }
+            : {}),
+          ...(input.expires_at_utc
+            ? { expiresAtUtc: input.expires_at_utc }
+            : {}),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "agent_bridge_get_result",
+    {
+      title: "Get Peer Agent Result",
+      description:
+        "Return the local delivery state and, when available, the result for a task created by agent_bridge_ask_agent.",
+      inputSchema: {
+        task_id: z.string().uuid(),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ task_id }) =>
+      toolResult(() => service.getAgentResult(task_id)),
   );
 
   server.registerTool(

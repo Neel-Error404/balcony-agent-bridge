@@ -51,6 +51,51 @@ export interface BridgeConfig {
   azureClientCertificatePath?: string;
 }
 
+const DispatcherEnvironmentSchema = z
+  .object({
+    BALCONY_DISPATCHER_PROJECTS_PATH: z.string().trim().min(1),
+    BALCONY_CODEX_EXECUTABLE: z.string().trim().min(1),
+    BALCONY_CODEX_EXECUTABLE_SHA256: z
+      .string()
+      .trim()
+      .regex(/^[a-f0-9]{64}$/i),
+    BALCONY_DISPATCHER_CODEX_HOME: z.string().trim().min(1),
+    BALCONY_DISPATCHER_TRUSTED_PATH: z.string().trim().min(1),
+    BALCONY_DISPATCHER_POLL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(250)
+      .max(60_000)
+      .default(2000),
+    BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(600)
+      .default(300),
+    BALCONY_DISPATCHER_MAX_OUTPUT_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1024)
+      .max(60_000)
+      .default(48_000),
+  })
+  .passthrough();
+
+export interface ReadOnlyDispatcherConfig {
+  systemId: SystemId;
+  peerSystemId: SystemId;
+  databasePath: string;
+  projectsPath: string;
+  codexExecutable: string;
+  codexExecutableSha256: string;
+  codexHome: string;
+  trustedPath: string;
+  pollIntervalMs: number;
+  defaultTimeoutSeconds: number;
+  maxOutputBytes: number;
+}
+
 export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): BridgeConfig {
@@ -118,6 +163,37 @@ export function requireServiceBusNamespace(config: BridgeConfig): string {
     );
   }
   return config.serviceBusNamespace;
+}
+
+export function loadReadOnlyDispatcherConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): ReadOnlyDispatcherConfig {
+  const bridge = loadConfig(environment);
+  const result = DispatcherEnvironmentSchema.safeParse(environment);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "environment"}: ${issue.message}`)
+      .join("; ");
+    throw new ConfigurationError(
+      `Invalid read-only dispatcher configuration: ${detail}`,
+    );
+  }
+
+  return {
+    systemId: bridge.systemId,
+    peerSystemId: bridge.peerSystemId,
+    databasePath: bridge.databasePath,
+    projectsPath: path.resolve(result.data.BALCONY_DISPATCHER_PROJECTS_PATH),
+    codexExecutable: path.resolve(result.data.BALCONY_CODEX_EXECUTABLE),
+    codexExecutableSha256:
+      result.data.BALCONY_CODEX_EXECUTABLE_SHA256.toLowerCase(),
+    codexHome: path.resolve(result.data.BALCONY_DISPATCHER_CODEX_HOME),
+    trustedPath: result.data.BALCONY_DISPATCHER_TRUSTED_PATH,
+    pollIntervalMs: result.data.BALCONY_DISPATCHER_POLL_INTERVAL_MS,
+    defaultTimeoutSeconds:
+      result.data.BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS,
+    maxOutputBytes: result.data.BALCONY_DISPATCHER_MAX_OUTPUT_BYTES,
+  };
 }
 
 function peerFor(systemId: SystemId): SystemId {

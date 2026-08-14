@@ -12,6 +12,8 @@ owner-approved physical host can use a dedicated Entra client certificate.
 
 - `balcony-agent-bridge-mcp-server`: local stdio MCP server.
 - `bridge-service`: long-running Azure transport worker.
+- `read-only-dispatcher`: optional local process that starts bounded Codex CLI
+  inspection jobs for explicitly routed requests.
 - SQLite: durable local message and claim state.
 - Azure Service Bus Standard: cross-machine transport.
 
@@ -26,16 +28,20 @@ Current per-item and scenario estimates are recorded in `docs/costs.md`.
 
 ## Current Status
 
-The approved Azure Service Bus topology is provisioned. All 54 tests, type
-checking, production build, Bicep compilation, dependency audit, and the
-compiled MCP smoke test pass.
+The approved Azure Service Bus topology is provisioned and the two-machine
+bridge acceptance is complete. The transport, local service, native MCP
+surface, durable claim lifecycle, restart recovery, and reverse reply path are
+verified on SYS-A and SYS-B.
 
 The SYS-B managed identity is attached to the verified SYS-B Azure VM. SYS-A
 is a physical Windows host and uses the approved certificate-backed Entra
 application. Azure Arc is not used. Live SYS-A certificate authentication,
 topic send, filtered subscription receive, PeekLock completion, durable
-SQLite processing, and all nine MCP tools are verified. Codex has the local
-MCP registration without Azure credentials.
+SQLite processing, and the original nine MCP tools are verified in the live
+deployment. The local implementation now exposes eleven tools, including the
+new high-level coordination pair; those additions still require the full
+release and SYS-B acceptance gates below. Codex has the local MCP registration
+without Azure credentials.
 
 The SYS-A Windows service is installed with the owner-approved WinSW v2.12.0
 x64 wrapper, starts automatically, and reports a healthy heartbeat. Restart,
@@ -44,9 +50,72 @@ idempotency, and offline pending-work recovery pass. Codex and the service
 share the ProgramData SQLite database through a least-privilege data-directory
 ACL.
 
-The remaining gates are SYS-B service installation from the next exact
-published revision, a reverse SYS-B-to-SYS-A reply, and final two-system reboot
-and recovery acceptance.
+The read-only dispatcher is implemented but is not installed or enabled as a
+machine background process yet. It claims only `task_request` messages whose
+payload explicitly selects `codex_cli` and `read_only`. It ignores ordinary
+tasks, resolves projects through a machine-local allowlist, starts Codex with
+an ephemeral read-only sandbox and no approval escalation, bounds time and
+output, and atomically publishes the result while completing the inbox claim.
+Long-running claims are renewed, lost claims cancel the child, and process
+shutdown terminates the active child tree.
+
+Git remains the transfer mechanism for code, skills, and documents. Dispatcher
+messages carry instructions and project keys, not local paths or files.
+
+## High-Level Coordination API
+
+`agent_bridge_ask_agent` creates a durable, versioned, read-only coordination
+request and immediately returns a `task_id`. Repeating the same logical request
+with the same idempotency key returns the original task. The caller uses
+`agent_bridge_get_result` to observe `queued`, `waiting`, `completed`,
+`rejected`, or `failed` state and retrieve the linked result when it arrives.
+
+This API is independent of Azure Service Bus and Codex at the contract layer.
+The coordination envelope, SQLite state, idempotency, and result linkage do not
+know which broker or agent runtime is underneath them. Azure Service Bus is the
+only production transport adapter today, and the optional dispatcher supports
+only bounded Codex CLI read-only execution.
+
+The bridge does not currently synchronize project memory, repository files, or
+conversation databases. The receiving agent inspects one locally allowlisted
+project and returns a bounded answer. Git remains the code/document transfer
+mechanism. A GitHub, HTTP, filesystem, LangGraph Store, Letta, or other memory
+connector would be a separate adapter behind the project/context boundary; it
+must not be embedded into the coordination envelope or trusted as project truth
+without its own authorization and evidence rules.
+
+## Read-Only Dispatch
+
+Example routing fragment:
+
+```json
+{
+  "project": "balcony-agent-bridge",
+  "dispatch": {
+    "executor": "codex_cli",
+    "access": "read_only",
+    "timeout_seconds": 300
+  }
+}
+```
+
+Each machine keeps its own uncommitted project registry based on
+`config/dispatcher-projects.example.json`. Build the repository, set the
+dispatcher environment variables, and start the foreground process with:
+
+```powershell
+npm run start:dispatcher
+```
+
+The process uses the same SQLite database as MCP and the Azure bridge but does
+not authenticate to Azure. See `docs/runbooks/read-only-dispatcher.md` before
+enabling background startup.
+
+`peer_readable: true` approves the entire configured project tree for read-only
+inspection by the peer system. Do not register a project that contains
+machine-private credentials, local `.env` files, private keys, connection
+material, or other files the peer is not allowed to read. Read-only prevents
+mutation; it is not a confidentiality boundary.
 
 ## Local Verification
 

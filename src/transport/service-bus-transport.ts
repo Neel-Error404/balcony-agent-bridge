@@ -61,6 +61,10 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
     },
   ): Promise<number> {
     let receiver: ServiceBusSessionReceiver | undefined;
+    const acceptWait = createSessionAcceptWait(
+      options?.abortSignal,
+      options?.maximumWaitTimeMs ?? 5000,
+    );
     try {
       receiver = await this.client.acceptNextSession(
         this.config.topicName,
@@ -68,11 +72,10 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
         {
           receiveMode: "peekLock",
           maxAutoLockRenewalDurationInMs: 5 * 60 * 1000,
-          ...(options?.abortSignal
-            ? { abortSignal: options.abortSignal }
-            : {}),
+          abortSignal: acceptWait.signal,
         },
       );
+      acceptWait.clearTimeout();
       const messages = await receiver.receiveMessages(
         options?.maximumMessages ?? 10,
         {
@@ -100,6 +103,9 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       }
       return messages.length;
     } catch (error) {
+      if (acceptWait.timedOut() || options?.abortSignal?.aborted) {
+        return 0;
+      }
       if (
         error instanceof ServiceBusError &&
         (error.code === "ServiceTimeout" ||
@@ -109,6 +115,7 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       }
       throw error;
     } finally {
+      acceptWait.dispose();
       await receiver?.close();
     }
   }
@@ -117,6 +124,56 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
     await this.sender.close();
     await this.client.close();
   }
+}
+
+interface SessionAcceptWait {
+  signal: AbortSignal;
+  timedOut(): boolean;
+  clearTimeout(): void;
+  dispose(): void;
+}
+
+export function createSessionAcceptWait(
+  parentSignal: AbortSignal | undefined,
+  maximumWaitTimeMs: number,
+): SessionAcceptWait {
+  if (!Number.isFinite(maximumWaitTimeMs) || maximumWaitTimeMs <= 0) {
+    throw new RangeError("maximumWaitTimeMs must be a positive finite number");
+  }
+
+  const controller = new AbortController();
+  let didTimeOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const abortFromParent = (): void => controller.abort(parentSignal?.reason);
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  timeout = setTimeout(() => {
+    didTimeOut = true;
+    controller.abort();
+  }, maximumWaitTimeMs);
+  timeout.unref?.();
+
+  const clearAcceptTimeout = (): void => {
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = undefined;
+    }
+  };
+
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    clearTimeout: clearAcceptTimeout,
+    dispose: () => {
+      clearAcceptTimeout();
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    },
+  };
 }
 
 export function createServiceBusCredential(

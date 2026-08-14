@@ -1,5 +1,10 @@
 # SYS-B Verification Handoff
 
+> Baseline handoff for the accepted nine-tool revision. For the current
+> unpublished eleven-tool coordination and read-only dispatcher candidate, use
+> `SYS-B-READ-ONLY-DISPATCHER-HANDOFF.md` only after the owner supplies an exact
+> approved Git revision.
+
 ## Source Gate
 
 - Repository: `balcony-agent-bridge`

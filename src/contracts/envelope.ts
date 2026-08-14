@@ -3,6 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { assertSecretSafe } from "../security/payload-policy.js";
+import {
+  CoordinationRequestSchema,
+  CoordinationResultSchema,
+} from "./coordination.js";
 
 export const SYSTEM_IDS = ["SYS-A", "SYS-B"] as const;
 export const MESSAGE_KINDS = [
@@ -27,6 +31,14 @@ export const EvidenceReferenceSchema = z
   })
   .strict();
 
+export const ReadOnlyDispatchSchema = z
+  .object({
+    executor: z.literal("codex_cli"),
+    access: z.literal("read_only"),
+    timeout_seconds: z.number().int().min(30).max(600).optional(),
+  })
+  .strict();
+
 export const MessagePayloadSchema = z
   .object({
     subject: z.string().trim().min(1).max(200),
@@ -35,6 +47,9 @@ export const MessagePayloadSchema = z
     repository: z.string().trim().min(1).max(260).optional(),
     task_reference: z.string().trim().min(1).max(260).optional(),
     evidence: z.array(EvidenceReferenceSchema).max(20).default([]),
+    dispatch: ReadOnlyDispatchSchema.optional(),
+    coordination_request: CoordinationRequestSchema.optional(),
+    coordination_result: CoordinationResultSchema.optional(),
   })
   .strict();
 
@@ -80,6 +95,94 @@ export const BridgeEnvelopeSchema = EnvelopeCoreSchema.superRefine(
           code: "custom",
           message: "expires_at_utc must be later than created_at_utc",
           path: ["expires_at_utc"],
+        });
+      }
+    }
+
+    if (value.payload.coordination_request) {
+      if (value.kind !== "task_request") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_request is allowed only on task_request messages",
+          path: ["payload", "coordination_request"],
+        });
+      }
+      if (
+        value.payload.dispatch?.executor !== "codex_cli" ||
+        value.payload.dispatch.access !== "read_only"
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_request requires an eligible read-only dispatcher",
+          path: ["payload", "dispatch"],
+        });
+      }
+      if (value.stream_id !== "agent-coordination") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_request requires the agent-coordination stream",
+          path: ["stream_id"],
+        });
+      }
+    }
+
+    if (value.payload.coordination_result) {
+      if (value.kind !== "task_result") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_result is allowed only on task_result messages",
+          path: ["payload", "coordination_result"],
+        });
+      }
+      if (
+        value.causation_id !==
+        value.payload.coordination_result.request_message_id
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_result request_message_id must match causation_id",
+          path: ["payload", "coordination_result", "request_message_id"],
+        });
+      }
+      if (value.stream_id !== "agent-coordination") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "coordination_result requires the agent-coordination stream",
+          path: ["stream_id"],
+        });
+      }
+    }
+
+    if (value.stream_id === "agent-coordination") {
+      if (value.kind === "task_request" && !value.payload.coordination_request) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "agent-coordination task_request requires coordination_request",
+          path: ["payload", "coordination_request"],
+        });
+      } else if (
+        value.kind === "task_result" &&
+        !value.payload.coordination_result
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "agent-coordination task_result requires coordination_result",
+          path: ["payload", "coordination_result"],
+        });
+      } else if (value.kind !== "task_request" && value.kind !== "task_result") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "agent-coordination stream accepts only task_request or task_result",
+          path: ["kind"],
         });
       }
     }

@@ -1,0 +1,95 @@
+# Read-Only Dispatcher Runbook
+
+## Purpose
+
+The dispatcher turns an explicitly routed bridge request into one bounded
+read-only Codex CLI job and returns the answer through the existing outbox.
+It does not edit repositories, connect to Azure, or replace the interactive
+Codex application.
+
+## Preconditions
+
+- Foundation through security tests pass in order.
+- Typecheck and production build pass.
+- The existing MCP server and Azure bridge use the same local SQLite database.
+- The local Codex CLI supports `exec`, `--ephemeral`,
+  `--ignore-user-config`, `--sandbox read-only`, and approval policy `never`.
+- A dedicated `CODEX_HOME` is available for dispatcher authentication.
+- The approved Codex wrapper SHA-256 and a trusted Node executable directory
+  are known.
+- The project registry is stored outside Git with access limited to the
+  dispatcher operator.
+
+## Local Configuration
+
+Copy the shape of `config/dispatcher-projects.example.json` to a machine-local
+path and add only approved local repositories. Project keys must be stable
+across SYS-A and SYS-B, but paths remain machine-specific and must never be
+sent through the bridge. Every enabled entry must set `peer_readable: true`.
+That flag approves the entire project tree for peer inspection.
+
+Do not register projects containing local `.env` files, private keys,
+connection files, credential caches, private certificates, `vms.yaml`, or
+other machine-private material. The read-only sandbox prevents mutation but
+does not guarantee that readable files cannot be returned in the answer.
+
+Set these variables only in the dispatcher process:
+
+```text
+BALCONY_SYSTEM_ID
+BALCONY_BRIDGE_DB_PATH
+BALCONY_DISPATCHER_PROJECTS_PATH
+BALCONY_CODEX_EXECUTABLE
+BALCONY_CODEX_EXECUTABLE_SHA256
+BALCONY_DISPATCHER_CODEX_HOME
+BALCONY_DISPATCHER_TRUSTED_PATH
+BALCONY_DISPATCHER_POLL_INTERVAL_MS
+BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS
+BALCONY_DISPATCHER_MAX_OUTPUT_BYTES
+```
+
+Do not provide Azure namespace, identity, certificate, token, connection
+string, or Git credential variables to the dispatcher child.
+
+The trusted PATH should contain only the approved Node executable directory
+and any operating-system directories required by the pinned Codex wrapper.
+Recalculate and reapprove the wrapper SHA-256 after every Codex CLI update.
+
+## Foreground Acceptance
+
+1. Build the repository.
+2. Start `npm run start:dispatcher` under the intended Windows user.
+3. Confirm the dispatcher heartbeat appears in `bridge:status`.
+4. Send one explicitly routed read-only request for an allowlisted test
+   project.
+5. Confirm exactly one `task_result` is returned.
+6. Confirm the repository worktree and tracked file hashes did not change.
+7. Repeat with an unknown project and confirm terminal rejection.
+8. Repeat with a forced timeout and confirm the child process tree stops.
+9. Stop the dispatcher, queue a request, restart it, and confirm recovery.
+10. Run a long request and confirm claim renewal.
+11. Stop the dispatcher during a hanging child and confirm the child tree
+    exits while the inbox request remains recoverable. Treat
+    `CODEX_TERMINATION_FAILED` as a stop-acceptance failure.
+12. Attempt a workspace mutation and confirm no file or Git state changes.
+13. Quarantine a synthetic prior deterministic result and confirm the request
+    is rejected through a separate pending failure result rather than marked
+    processed without a deliverable reply.
+
+## Background Activation Gate
+
+Do not install automatic startup until the owner selects one of these modes:
+
+- User-session startup: starts at logon and reuses that user's dedicated Codex
+  authentication. It stops when the Windows user session ends.
+- Windows service startup: runs without a user session but requires an
+  approved restricted service account and dedicated noninteractive Codex
+  authentication storage.
+
+The restricted account must have read access only to approved project trees,
+write access only to the bridge SQLite data directory and required temporary
+locations, and no access to unrelated user profiles or machine credentials.
+
+Do not place passwords, API keys, access tokens, or copied interactive login
+material in WinSW XML, Task Scheduler arguments, repository files, Obsidian,
+or bridge messages.

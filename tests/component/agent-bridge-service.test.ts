@@ -72,6 +72,71 @@ describe("AgentBridgeService", () => {
     expect(result.accepted).toBe(true);
     expect(database.getStatus().outbox.pending).toBe(1);
   });
+
+  it("creates idempotent coordination tasks and returns their result", () => {
+    const first = service.askAgent({
+      idempotencyKey: "ask-agent-1",
+      projectId: "voiceai-platform",
+      subject: "Inspect VoiceAI",
+      request: "Report the repository state without modifying it.",
+      intent: "inspect",
+      timeoutSeconds: 120,
+    }) as {
+      task_id: string;
+      conversation_id: string;
+      status: string;
+    };
+    const duplicate = service.askAgent({
+      idempotencyKey: "ask-agent-1",
+      projectId: "voiceai-platform",
+      subject: "Inspect VoiceAI",
+      request: "Report the repository state without modifying it.",
+      intent: "inspect",
+      timeoutSeconds: 120,
+    }) as {
+      task_id: string;
+      conversation_id: string;
+      duplicate: boolean;
+    };
+
+    expect(first.status).toBe("queued");
+    expect(duplicate).toMatchObject({
+      task_id: first.task_id,
+      conversation_id: first.conversation_id,
+      duplicate: true,
+    });
+
+    const reply = createEnvelope({
+      idempotencyKey: "ask-agent-1-result",
+      originSystem: "SYS-B",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: first.conversation_id,
+      causationId: first.task_id,
+      payload: {
+        subject: "VoiceAI inspection complete",
+        body: "The repository is available and clean.",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: first.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(reply, 1);
+
+    expect(service.getAgentResult(first.task_id)).toMatchObject({
+      task_id: first.task_id,
+      conversation_id: first.conversation_id,
+      status: "completed",
+      result_message_id: reply.message_id,
+      result: {
+        body: "The repository is available and clean.",
+      },
+    });
+  });
 });
 
 function incomingEnvelope() {

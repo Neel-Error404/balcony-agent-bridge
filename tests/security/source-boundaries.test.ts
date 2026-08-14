@@ -33,6 +33,14 @@ describe("source security boundaries", () => {
       /Endpoint=sb:\/\/[^;\s]+;SharedAccessKeyName=[^;\s]+;SharedAccessKey=[^;\s]+/i,
     );
   });
+
+  it("does not launch a dispatcher through an interpolated shell", () => {
+    const source = readSourceFiles();
+    expect(source).not.toContain("shell: true");
+    expect(source).not.toContain(
+      "--dangerously-bypass-approvals-and-sandbox",
+    );
+  });
 });
 
 function readSourceFiles(): string {

@@ -32,3 +32,41 @@ export class StateTransitionError extends BridgeError {
     this.name = "StateTransitionError";
   }
 }
+
+export class DispatchConfigurationError extends BridgeError {
+  public constructor(message: string, options?: ErrorOptions) {
+    super("DISPATCH_CONFIGURATION_ERROR", message, options);
+    this.name = "DispatchConfigurationError";
+  }
+}
+
+export class DispatchRejectedError extends BridgeError {
+  public constructor(message: string) {
+    super("DISPATCH_REJECTED", message);
+    this.name = "DispatchRejectedError";
+  }
+}
+
+export class DispatchResultUnavailableError extends BridgeError {
+  public constructor(message: string) {
+    super("DISPATCH_RESULT_UNAVAILABLE", message);
+    this.name = "DispatchResultUnavailableError";
+  }
+}
+
+export class CodexExecutionError extends BridgeError {
+  public constructor(
+    code:
+      | "CODEX_LAUNCH_FAILED"
+      | "CODEX_EXIT_FAILED"
+      | "CODEX_TIMED_OUT"
+      | "CODEX_ABORTED"
+      | "CODEX_TERMINATION_FAILED"
+      | "CODEX_OUTPUT_INVALID",
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(code, message, options);
+    this.name = "CodexExecutionError";
+  }
+}

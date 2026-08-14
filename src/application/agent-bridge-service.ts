@@ -4,6 +4,10 @@ import {
   type MessageKind,
   type MessagePayload,
 } from "../contracts/envelope.js";
+import {
+  COORDINATION_PROTOCOL_VERSION,
+  type CoordinationIntent,
+} from "../contracts/coordination.js";
 import type { BridgeConfig } from "../config.js";
 import { StateTransitionError } from "../errors.js";
 import {
@@ -29,6 +33,17 @@ export interface ClaimInboxInput {
   limit: number;
   leaseSeconds: number;
   kinds?: MessageKind[];
+}
+
+export interface AskAgentInput {
+  idempotencyKey: string;
+  projectId: string;
+  subject: string;
+  request: string;
+  intent: CoordinationIntent;
+  timeoutSeconds: number;
+  conversationId?: string;
+  expiresAtUtc?: string;
 }
 
 export class AgentBridgeService {
@@ -61,12 +76,100 @@ export class AgentBridgeService {
       expiresAtUtc,
     });
     const result = this.database.enqueueEnvelope(envelope);
+    const authoritative = this.database.getOutboxMessage(result.messageId);
+    if (!authoritative) {
+      throw new StateTransitionError(
+        `Accepted outbox message '${result.messageId}' could not be read back`,
+      );
+    }
     return {
       accepted: true,
       duplicate: result.duplicate,
       message_id: result.messageId,
       state: result.state,
-      queued_at_utc: envelope.created_at_utc,
+      conversation_id: authoritative.envelope.conversation_id,
+      queued_at_utc: authoritative.envelope.created_at_utc,
+    };
+  }
+
+  public askAgent(input: AskAgentInput) {
+    const request = this.send({
+      idempotencyKey: input.idempotencyKey,
+      kind: "task_request",
+      streamId: "agent-coordination",
+      payload: {
+        subject: input.subject,
+        body: input.request,
+        project: input.projectId,
+        evidence: [],
+        dispatch: {
+          executor: "codex_cli",
+          access: "read_only",
+          timeout_seconds: input.timeoutSeconds,
+        },
+        coordination_request: {
+          protocol_version: COORDINATION_PROTOCOL_VERSION,
+          intent: input.intent,
+          access_mode: "read_only",
+        },
+      },
+      ...(input.conversationId
+        ? { conversationId: input.conversationId }
+        : {}),
+      ...(input.expiresAtUtc ? { expiresAtUtc: input.expiresAtUtc } : {}),
+    });
+    return {
+      accepted: request.accepted,
+      duplicate: request.duplicate,
+      task_id: request.message_id,
+      conversation_id: request.conversation_id,
+      status: request.state === "sent" ? "waiting" : "queued",
+      delivery_state: request.state,
+      queued_at_utc: request.queued_at_utc,
+    };
+  }
+
+  public getAgentResult(taskId: string) {
+    const request = this.database.getOutboxMessage(taskId);
+    if (
+      !request ||
+      request.envelope.kind !== "task_request" ||
+      !request.envelope.payload.coordination_request
+    ) {
+      throw new StateTransitionError(
+        `Coordination task '${taskId}' does not exist`,
+      );
+    }
+
+    const reply = this.database.findInboxReplyTo(taskId);
+    if (reply) {
+      const metadata = reply.envelope.payload.coordination_result;
+      const outcome =
+        reply.state === "quarantined"
+          ? "failed"
+          : (metadata?.outcome ?? "completed");
+      return {
+        task_id: taskId,
+        conversation_id: request.envelope.conversation_id,
+        status: outcome,
+        delivery_state: request.state,
+        result_message_id: reply.envelope.message_id,
+        result_state: reply.state,
+        result: reply.envelope.payload,
+      };
+    }
+
+    const status =
+      request.state === "sent"
+        ? "waiting"
+        : request.state === "quarantined" || request.state === "expired"
+          ? "failed"
+          : "queued";
+    return {
+      task_id: taskId,
+      conversation_id: request.envelope.conversation_id,
+      status,
+      delivery_state: request.state,
     };
   }
 
@@ -166,6 +269,61 @@ export class AgentBridgeService {
     kind: MessageKind,
     payload: MessagePayload,
   ) {
+    const envelope = this.createReplyEnvelope(
+      originalMessageId,
+      idempotencyKey,
+      kind,
+      payload,
+    );
+    const result = this.database.enqueueEnvelope(envelope);
+    return {
+      accepted: true,
+      duplicate: result.duplicate,
+      message_id: result.messageId,
+      state: result.state,
+      queued_at_utc: envelope.created_at_utc,
+    };
+  }
+
+  public settleWithReply(input: {
+    originalMessageId: string;
+    consumerId: string;
+    claimToken: string;
+    outcome: "processed" | "rejected";
+    idempotencyKey: string;
+    kind: MessageKind;
+    payload: MessagePayload;
+    reason?: string;
+  }): Record<string, unknown> {
+    const envelope = this.createReplyEnvelope(
+      input.originalMessageId,
+      input.idempotencyKey,
+      input.kind,
+      input.payload,
+    );
+    const result = this.database.settleInboxWithReply({
+      messageId: input.originalMessageId,
+      consumerId: input.consumerId,
+      claimToken: input.claimToken,
+      outcome: input.outcome,
+      replyEnvelope: envelope,
+      ...(input.reason ? { reason: input.reason } : {}),
+    });
+    return {
+      message_id: input.originalMessageId,
+      state: result.inboxState,
+      reply_message_id: result.reply.messageId,
+      reply_state: result.reply.state,
+      duplicate: result.reply.duplicate,
+    };
+  }
+
+  private createReplyEnvelope(
+    originalMessageId: string,
+    idempotencyKey: string,
+    kind: MessageKind,
+    payload: MessagePayload,
+  ) {
     const original = this.database.getInboxMessage(originalMessageId);
     if (!original) {
       throw new StateTransitionError(
@@ -178,9 +336,11 @@ export class AgentBridgeService {
       );
     }
 
-    return this.send({
+    return createEnvelope({
       idempotencyKey,
-      kind,
+      originSystem: this.config.systemId,
+      targetSystem: this.config.peerSystemId,
+      kind: kind,
       streamId: original.envelope.stream_id,
       conversationId: original.envelope.conversation_id,
       causationId: original.envelope.message_id,
@@ -188,6 +348,9 @@ export class AgentBridgeService {
       ...(original.envelope.correlation_id
         ? { correlationId: original.envelope.correlation_id }
         : {}),
+      expiresAtUtc: new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ).toISOString(),
     });
   }
 

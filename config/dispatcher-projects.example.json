@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "projects": [
+    {
+      "key": "balcony-agent-bridge",
+      "path": "D:\\replace-with-local-project-path",
+      "enabled": true,
+      "peer_readable": true
+    }
+  ]
+}

@@ -20,6 +20,7 @@
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "start:mcp": "node dist/mcp/index.js",
     "start:bridge": "node dist/bridge/index.js",
+    "start:dispatcher": "node dist/dispatcher/index.js",
     "bridge:status": "node dist/cli/index.js status"
   },
   "dependencies": {

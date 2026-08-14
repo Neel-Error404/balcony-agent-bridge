@@ -45,9 +45,11 @@ describe("MCP server", () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual(
       [
+        "agent_bridge_ask_agent",
         "agent_bridge_claim",
         "agent_bridge_complete",
         "agent_bridge_fail",
+        "agent_bridge_get_result",
         "agent_bridge_list_inbox",
         "agent_bridge_read",
         "agent_bridge_renew_claim",
@@ -56,6 +58,94 @@ describe("MCP server", () => {
         "agent_bridge_status",
       ].sort(),
     );
+  });
+
+  it("creates an idempotent coordination task and returns its linked result", async () => {
+    const askArguments = {
+      idempotency_key: "mcp-coordinate-1",
+      project_id: "voiceai",
+      subject: "Inspect VoiceAI",
+      request: "Report the current repository state without modifying it.",
+      intent: "inspect",
+      timeout_seconds: 120,
+    };
+    const first = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_ask_agent",
+        arguments: askArguments,
+      }),
+    ) as {
+      task_id: string;
+      conversation_id: string;
+      status: string;
+      duplicate: boolean;
+    };
+    const duplicate = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_ask_agent",
+        arguments: askArguments,
+      }),
+    ) as {
+      task_id: string;
+      conversation_id: string;
+      duplicate: boolean;
+    };
+
+    expect(first.status).toBe("queued");
+    expect(first.duplicate).toBe(false);
+    expect(duplicate).toMatchObject({
+      task_id: first.task_id,
+      conversation_id: first.conversation_id,
+      duplicate: true,
+    });
+
+    const waiting = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_get_result",
+        arguments: { task_id: first.task_id },
+      }),
+    ) as { status: string };
+    expect(waiting.status).toBe("queued");
+
+    const result = createEnvelope({
+      idempotencyKey: "mcp-coordinate-result-1",
+      originSystem: "SYS-B",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: first.conversation_id,
+      causationId: first.task_id,
+      payload: {
+        subject: "VoiceAI inspection complete",
+        body: "The approved checks pass.",
+        project: "voiceai",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: first.task_id,
+          outcome: "completed",
+        },
+      },
+      expiresAtUtc: "2026-08-20T12:00:00.000Z",
+      now: new Date("2026-08-13T12:00:00.000Z"),
+    });
+    database.persistIncoming(result, 1);
+
+    const completed = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_get_result",
+        arguments: { task_id: first.task_id },
+      }),
+    ) as {
+      status: string;
+      result_message_id: string;
+      result: { body: string };
+    };
+    expect(completed).toMatchObject({
+      status: "completed",
+      result_message_id: result.message_id,
+      result: { body: "The approved checks pass." },
+    });
   });
 
   it("durably enqueues through MCP and reports local status", async () => {

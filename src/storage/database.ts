@@ -10,6 +10,7 @@ import {
   type MessageKind,
 } from "../contracts/envelope.js";
 import {
+  DispatchResultUnavailableError,
   IdempotencyConflictError,
   StateTransitionError,
 } from "../errors.js";
@@ -65,6 +66,11 @@ export interface PersistIncomingResult {
   messageId: string;
 }
 
+export interface SettleInboxWithReplyResult {
+  inboxState: "processed" | "rejected";
+  reply: EnqueueResult;
+}
+
 export interface ClaimedInboxMessage {
   envelope: BridgeEnvelope;
   claimToken: string;
@@ -78,6 +84,11 @@ export interface InboxListItem {
   claimUntilUtc?: string;
 }
 
+export interface OutboxListItem {
+  envelope: BridgeEnvelope;
+  state: OutboxState;
+}
+
 export type AcknowledgeOutcome = "processed" | "rejected" | "retry";
 
 export interface BridgeStatus {
@@ -87,6 +98,9 @@ export interface BridgeStatus {
   bridgeHeartbeatAtUtc?: string;
   bridgeRuntimeStatus?: string;
   lastTransportErrorCode?: string;
+  dispatcherHeartbeatAtUtc?: string;
+  dispatcherRuntimeStatus?: string;
+  lastDispatcherErrorCode?: string;
 }
 
 export class BridgeDatabase {
@@ -124,37 +138,66 @@ export class BridgeDatabase {
     };
   }
 
+  public getOutboxMessage(messageId: string): OutboxListItem | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM outbox WHERE message_id = ?`,
+      )
+      .get(messageId) as
+      | Pick<OutboxRow, "envelope_json" | "state">
+      | undefined;
+    if (!row) {
+      return undefined;
+    }
+    return {
+      envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+      state: row.state,
+    };
+  }
+
+  public findInboxReplyTo(
+    requestMessageId: string,
+  ): InboxListItem | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT message_id, envelope_json, payload_sha256, state,
+                claim_owner, claim_token_hash, claim_until_utc
+         FROM inbox
+         WHERE causation_id = ? AND kind = 'task_result'
+         ORDER BY first_received_at_utc, message_id
+         LIMIT 1`,
+      )
+      .get(requestMessageId) as InboxRow | undefined;
+    if (!row) {
+      return undefined;
+    }
+    return {
+      envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+      state: row.state,
+      ...(row.claim_owner ? { claimOwner: row.claim_owner } : {}),
+      ...(row.claim_until_utc ? { claimUntilUtc: row.claim_until_utc } : {}),
+    };
+  }
+
   public close(): void {
     this.database.close();
   }
 
   public enqueueEnvelope(envelopeValue: unknown): EnqueueResult {
     const envelope = parseEnvelope(envelopeValue);
-    const existing = this.database
-      .prepare(
-        `SELECT message_id, envelope_json, state
-         FROM outbox
-         WHERE target_system = ? AND idempotency_key = ?`,
-      )
-      .get(envelope.target_system, envelope.idempotency_key) as
-      | Pick<OutboxRow, "message_id" | "envelope_json" | "state">
-      | undefined;
+    const transaction = this.database.transaction(() =>
+      this.enqueueEnvelopeRow(envelope),
+    );
+    return transaction();
+  }
 
-    if (existing) {
-      const prior = parseEnvelope(JSON.parse(existing.envelope_json));
-      if (!sameIdempotentOperation(prior, envelope)) {
-        throw new IdempotencyConflictError(envelope.idempotency_key);
-      }
-      return {
-        messageId: existing.message_id,
-        state: existing.state,
-        duplicate: true,
-      };
-    }
-
-    this.database
+  private enqueueEnvelopeRow(
+    envelope: BridgeEnvelope,
+  ): EnqueueResult {
+    const insert = this.database
       .prepare(
-        `INSERT INTO outbox (
+        `INSERT OR IGNORE INTO outbox (
           message_id,
           idempotency_key,
           target_system,
@@ -181,12 +224,230 @@ export class BridgeDatabase {
         envelope.created_at_utc,
         envelope.expires_at_utc ?? null,
       );
+    if (insert.changes === 1) {
+      return {
+        messageId: envelope.message_id,
+        state: "pending",
+        duplicate: false,
+      };
+    }
 
+    const existing = this.getOutboxOperation(
+      envelope.target_system,
+      envelope.idempotency_key,
+    );
+
+    if (existing) {
+      const prior = existing.envelope;
+      if (!sameIdempotentOperation(prior, envelope)) {
+        throw new IdempotencyConflictError(envelope.idempotency_key);
+      }
+      return {
+        messageId: prior.message_id,
+        state: existing.state,
+        duplicate: true,
+      };
+    }
+
+    throw new StateTransitionError(
+      `Outbox message '${envelope.message_id}' collided with an unrelated existing row`,
+    );
+  }
+
+  private getOutboxOperation(
+    targetSystem: string,
+    idempotencyKey: string,
+  ):
+    | {
+        envelope: BridgeEnvelope;
+        state: OutboxState;
+      }
+    | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM outbox
+         WHERE target_system = ? AND idempotency_key = ?`,
+      )
+      .get(targetSystem, idempotencyKey) as
+      | Pick<OutboxRow, "envelope_json" | "state">
+      | undefined;
+    if (!row) {
+      return undefined;
+    }
     return {
-      messageId: envelope.message_id,
-      state: "pending",
-      duplicate: false,
+      envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+      state: row.state,
     };
+  }
+
+  public settleInboxWithReply(input: {
+    messageId: string;
+    consumerId: string;
+    claimToken: string;
+    outcome: "processed" | "rejected";
+    replyEnvelope: unknown;
+    reason?: string;
+    now?: Date;
+  }): SettleInboxWithReplyResult {
+    const reply = parseEnvelope(input.replyEnvelope);
+    const now = input.now ?? new Date();
+    const nowUtc = now.toISOString();
+    const transaction = this.database.transaction(
+      (): SettleInboxWithReplyResult => {
+        const existing = this.database
+          .prepare(
+            `SELECT state, claim_owner, claim_token_hash, claim_until_utc,
+                    result_message_id, result_idempotency_key,
+                    result_payload_sha256
+             FROM inbox WHERE message_id = ?`,
+          )
+          .get(input.messageId) as
+          | {
+              state: InboxState;
+              claim_owner: string | null;
+              claim_token_hash: string | null;
+              claim_until_utc: string | null;
+              result_message_id: string | null;
+              result_idempotency_key: string | null;
+              result_payload_sha256: string | null;
+            }
+          | undefined;
+        if (!existing) {
+          throw new StateTransitionError(
+            `Inbox message '${input.messageId}' does not exist`,
+          );
+        }
+
+        if (existing.state === input.outcome) {
+          if (
+            existing.result_message_id &&
+            existing.result_idempotency_key === reply.idempotency_key
+          ) {
+            const authoritative = this.getOutboxOperation(
+              reply.target_system,
+              reply.idempotency_key,
+            );
+            if (
+              !authoritative ||
+              authoritative.envelope.message_id !==
+                existing.result_message_id ||
+              authoritative.envelope.payload_sha256 !==
+                existing.result_payload_sha256
+            ) {
+              throw new StateTransitionError(
+                `Inbox message '${input.messageId}' has inconsistent result metadata`,
+              );
+            }
+            return {
+              inboxState: input.outcome,
+              reply: {
+                messageId: authoritative.envelope.message_id,
+                state: authoritative.state,
+                duplicate: true,
+              },
+            };
+          }
+          throw new StateTransitionError(
+            `Inbox message '${input.messageId}' was already settled with a different result`,
+          );
+        }
+
+        if (
+          existing.state !== "claimed" ||
+          existing.claim_owner !== input.consumerId ||
+          existing.claim_token_hash !== hashToken(input.claimToken) ||
+          !existing.claim_until_utc ||
+          existing.claim_until_utc <= nowUtc
+        ) {
+          throw new StateTransitionError(
+            `Claim for inbox message '${input.messageId}' is invalid or expired`,
+          );
+        }
+
+        let authoritativeReply = reply;
+        let enqueued: EnqueueResult;
+        try {
+          enqueued = this.enqueueEnvelopeRow(reply);
+        } catch (error) {
+          if (!(error instanceof IdempotencyConflictError)) {
+            throw error;
+          }
+          const existingReply = this.getOutboxOperation(
+            reply.target_system,
+            reply.idempotency_key,
+          );
+          if (
+            !existingReply ||
+            existingReply.envelope.kind !== reply.kind ||
+            existingReply.envelope.conversation_id !==
+              reply.conversation_id ||
+            existingReply.envelope.causation_id !== input.messageId
+          ) {
+            throw error;
+          }
+          if (
+            existingReply.state === "quarantined" ||
+            existingReply.state === "expired"
+          ) {
+            throw new DispatchResultUnavailableError(
+              "The existing deterministic result is not deliverable.",
+            );
+          }
+          authoritativeReply = existingReply.envelope;
+          enqueued = {
+            messageId: authoritativeReply.message_id,
+            state: existingReply.state,
+            duplicate: true,
+          };
+        }
+        const update = this.database
+          .prepare(
+            `UPDATE inbox
+             SET state = ?,
+                 claim_owner = NULL,
+                 claim_token_hash = NULL,
+                 claim_until_utc = NULL,
+                 processed_at_utc = CASE
+                   WHEN ? = 'processed' THEN ?
+                   ELSE processed_at_utc
+                 END,
+                 last_error = ?,
+                 result_message_id = ?,
+                 result_idempotency_key = ?,
+                 result_payload_sha256 = ?
+             WHERE message_id = ?
+               AND state = 'claimed'
+               AND claim_owner = ?
+               AND claim_token_hash = ?
+               AND claim_until_utc > ?`,
+          )
+          .run(
+            input.outcome,
+            input.outcome,
+            nowUtc,
+            input.reason ? truncate(input.reason, 2000) : null,
+            enqueued.messageId,
+            authoritativeReply.idempotency_key,
+            authoritativeReply.payload_sha256,
+            input.messageId,
+            input.consumerId,
+            hashToken(input.claimToken),
+            nowUtc,
+          );
+        if (update.changes !== 1) {
+          throw new StateTransitionError(
+            `Claim for inbox message '${input.messageId}' was lost before result settlement`,
+          );
+        }
+
+        return {
+          inboxState: input.outcome,
+          reply: enqueued,
+        };
+      },
+    );
+    return transaction();
   }
 
   public leaseOutbox(
@@ -398,6 +659,7 @@ export class BridgeDatabase {
             origin_system,
             kind,
             stream_id,
+            causation_id,
             payload_sha256,
             envelope_json,
             state,
@@ -405,13 +667,14 @@ export class BridgeDatabase {
             first_received_at_utc,
             last_received_at_utc,
             broker_delivery_count
-          ) VALUES (?, ?, ?, ?, ?, ?, 'available', 0, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'available', 0, ?, ?, ?)`,
         )
         .run(
           envelope.message_id,
           envelope.origin_system,
           envelope.kind,
           envelope.stream_id,
+          envelope.causation_id ?? null,
           envelope.payload_sha256,
           JSON.stringify(envelope),
           nowUtc,
@@ -460,6 +723,46 @@ export class BridgeDatabase {
     kinds?: MessageKind[],
     now = new Date(),
   ): ClaimedInboxMessage[] {
+    const kindFilter =
+      kinds && kinds.length > 0
+        ? `AND kind IN (${kinds.map(() => "?").join(", ")})`
+        : "";
+    return this.claimInboxWhere(
+      consumerId,
+      limit,
+      leaseSeconds,
+      kindFilter,
+      kinds ?? [],
+      now,
+    );
+  }
+
+  public claimReadOnlyDispatchInbox(
+    consumerId: string,
+    limit: number,
+    leaseSeconds: number,
+    now = new Date(),
+  ): ClaimedInboxMessage[] {
+    return this.claimInboxWhere(
+      consumerId,
+      limit,
+      leaseSeconds,
+      `AND kind = 'task_request'
+       AND json_extract(envelope_json, '$.payload.dispatch.executor') = 'codex_cli'
+       AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'`,
+      [],
+      now,
+    );
+  }
+
+  private claimInboxWhere(
+    consumerId: string,
+    limit: number,
+    leaseSeconds: number,
+    additionalFilter: string,
+    additionalParameters: readonly string[],
+    now: Date,
+  ): ClaimedInboxMessage[] {
     assertNonEmpty(consumerId, "consumerId");
     assertPositiveInteger(limit, "limit");
     assertPositiveInteger(leaseSeconds, "leaseSeconds");
@@ -478,13 +781,9 @@ export class BridgeDatabase {
         )
         .run(nowUtc);
 
-      const kindFilter =
-        kinds && kinds.length > 0
-          ? `AND kind IN (${kinds.map(() => "?").join(", ")})`
-          : "";
       const parameters: Array<string | number> = [
         nowUtc,
-        ...(kinds ?? []),
+        ...additionalParameters,
         limit,
       ];
       const rows = this.database
@@ -497,7 +796,7 @@ export class BridgeDatabase {
                json_extract(envelope_json, '$.expires_at_utc') IS NULL
                OR json_extract(envelope_json, '$.expires_at_utc') > ?
              )
-             ${kindFilter}
+             ${additionalFilter}
            ORDER BY first_received_at_utc, message_id
            LIMIT ?`,
         )
@@ -642,6 +941,37 @@ export class BridgeDatabase {
     lastErrorCode?: string,
     now = new Date(),
   ): void {
+    this.recordRuntimeHeartbeat(
+      "bridge",
+      instanceId,
+      status,
+      lastErrorCode,
+      now,
+    );
+  }
+
+  public recordDispatcherHeartbeat(
+    instanceId: string,
+    status: string,
+    lastErrorCode?: string,
+    now = new Date(),
+  ): void {
+    this.recordRuntimeHeartbeat(
+      "dispatcher",
+      instanceId,
+      status,
+      lastErrorCode,
+      now,
+    );
+  }
+
+  private recordRuntimeHeartbeat(
+    component: "bridge" | "dispatcher",
+    instanceId: string,
+    status: string,
+    lastErrorCode: string | undefined,
+    now: Date,
+  ): void {
     const safeCode = lastErrorCode
       ? normalizeErrorCode(lastErrorCode)
       : null;
@@ -649,14 +979,14 @@ export class BridgeDatabase {
       .prepare(
         `INSERT INTO runtime_state (
           component, instance_id, status, heartbeat_at_utc, last_error
-        ) VALUES ('bridge', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(component) DO UPDATE SET
           instance_id = excluded.instance_id,
           status = excluded.status,
           heartbeat_at_utc = excluded.heartbeat_at_utc,
           last_error = excluded.last_error`,
       )
-      .run(instanceId, status, now.toISOString(), safeCode);
+      .run(component, instanceId, status, now.toISOString(), safeCode);
   }
 
   public getStatus(): BridgeStatus {
@@ -688,6 +1018,18 @@ export class BridgeDatabase {
           last_error: string | null;
         }
       | undefined;
+    const dispatcherRuntime = this.database
+      .prepare(
+        `SELECT status, heartbeat_at_utc, last_error
+         FROM runtime_state WHERE component = 'dispatcher'`,
+      )
+      .get() as
+      | {
+          status: string;
+          heartbeat_at_utc: string;
+          last_error: string | null;
+        }
+      | undefined;
 
     return {
       outbox,
@@ -701,6 +1043,19 @@ export class BridgeDatabase {
             bridgeRuntimeStatus: runtime.status,
             ...(runtime.last_error
               ? { lastTransportErrorCode: runtime.last_error }
+              : {}),
+          }
+        : {}),
+      ...(dispatcherRuntime
+        ? {
+            dispatcherHeartbeatAtUtc:
+              dispatcherRuntime.heartbeat_at_utc,
+            dispatcherRuntimeStatus: dispatcherRuntime.status,
+            ...(dispatcherRuntime.last_error
+              ? {
+                  lastDispatcherErrorCode:
+                    dispatcherRuntime.last_error,
+                }
               : {}),
           }
         : {}),
@@ -784,6 +1139,7 @@ export class BridgeDatabase {
         origin_system TEXT NOT NULL CHECK (origin_system IN ('SYS-A', 'SYS-B')),
         kind TEXT NOT NULL,
         stream_id TEXT NOT NULL,
+        causation_id TEXT,
         payload_sha256 TEXT NOT NULL,
         envelope_json TEXT NOT NULL,
         state TEXT NOT NULL CHECK (
@@ -797,7 +1153,10 @@ export class BridgeDatabase {
         last_received_at_utc TEXT NOT NULL,
         broker_delivery_count INTEGER NOT NULL DEFAULT 0,
         processed_at_utc TEXT,
-        last_error TEXT
+        last_error TEXT,
+        result_message_id TEXT,
+        result_idempotency_key TEXT,
+        result_payload_sha256 TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_inbox_claim
@@ -829,6 +1188,64 @@ export class BridgeDatabase {
       INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc)
       VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     `);
+    const migration = this.database.transaction(() => {
+      this.ensureColumn("inbox", "result_message_id", "TEXT");
+      this.ensureColumn("inbox", "result_idempotency_key", "TEXT");
+      this.ensureColumn("inbox", "result_payload_sha256", "TEXT");
+      this.database
+        .prepare(
+          `INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc)
+           VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+        )
+        .run();
+    });
+    migration.immediate();
+
+    const coordinationMigration = this.database.transaction(() => {
+      this.ensureColumn("inbox", "causation_id", "TEXT");
+      const rows = this.database
+        .prepare(
+          `SELECT message_id, envelope_json
+           FROM inbox WHERE causation_id IS NULL`,
+        )
+        .all() as Array<Pick<InboxRow, "message_id" | "envelope_json">>;
+      const update = this.database.prepare(
+        `UPDATE inbox SET causation_id = ? WHERE message_id = ?`,
+      );
+      for (const row of rows) {
+        const envelope = parseEnvelope(JSON.parse(row.envelope_json));
+        if (envelope.causation_id) {
+          update.run(envelope.causation_id, row.message_id);
+        }
+      }
+      this.database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_inbox_causation
+          ON inbox (causation_id, first_received_at_utc);
+      `);
+      this.database
+        .prepare(
+          `INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc)
+           VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+        )
+        .run();
+    });
+    coordinationMigration.immediate();
+  }
+
+  private ensureColumn(
+    table: "inbox",
+    column: string,
+    declaration: string,
+  ): void {
+    const columns = this.database
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as Array<{ name: string }>;
+    if (columns.some((existing) => existing.name === column)) {
+      return;
+    }
+    this.database.exec(
+      `ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`,
+    );
   }
 }
 

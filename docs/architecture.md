@@ -9,6 +9,66 @@ The MCP server validates requests and performs short SQLite transactions. It
 does not connect to Azure. The bridge service is the only process allowed to
 authenticate to Azure Service Bus.
 
+The optional read-only dispatcher is a third local process. It shares the
+SQLite database, claims only explicitly routed read-only Codex tasks, and never
+connects to Azure. Codex execution does not occur inside the broker receive
+handler, so a long inspection cannot hold an Azure message lock.
+
+The dispatcher uses a machine-local project registry. Remote messages select a
+stable project key and never provide a filesystem path or executable command.
+The child process receives a minimal environment and fixed Codex arguments:
+ephemeral session, ignored user configuration, read-only sandbox, no approval
+requests, bounded runtime, and bounded stdout. The configured executable is
+SHA-256 pinned, and the child receives an explicit trusted PATH rather than the
+operator's inherited PATH.
+
+Project registration requires explicit whole-project peer-read approval.
+Read-only execution prevents writes but does not make secret-bearing project
+files safe to expose. Projects containing machine-private material must not be
+registered; stronger confidentiality requires a restricted operating-system
+account and filesystem ACLs.
+
+## Coordination And Adapter Boundaries
+
+The high-level coordination contract is versioned independently from the
+transport. A request contains an intent (`inspect`, `question`, or `review`), a
+read-only access declaration, a stable project key, and ordinary task content.
+A result identifies the original request through both `causation_id` and
+`coordination_result.request_message_id`. Envelope validation rejects a
+mismatch before persistence.
+
+The durable transaction is:
+
+1. `agent_bridge_ask_agent` commits a local outbox request and returns its task
+   ID.
+2. A `BridgeTransport` implementation moves the unchanged envelope to the peer.
+3. The peer either leaves it for an interactive consumer or an explicitly
+   started dispatcher claims it.
+4. The peer publishes one causally linked task result.
+5. `agent_bridge_get_result` finds that result in the local inbox without
+   requiring broker access.
+
+`BridgeTransport` is the narrow transfer seam: send one envelope, receive
+available deliveries, and close. Service Bus is the only production adapter;
+the fake adapter verifies the protocol without Azure. A future broker, HTTPS
+relay, or GitHub-backed queue can implement the same seam, but must preserve
+at-least-once delivery, stable message IDs, acknowledgement behavior, and the
+secret policy.
+
+Project context is a different seam. Today the dispatcher maps a stable project
+key to one machine-local allowlisted directory and Codex reads that directory.
+The bridge has no generalized memory provider, LangGraph Store integration,
+Letta integration, remote repository reader, or file-transfer protocol. Such a
+connector should produce bounded evidence for an executor; it should not change
+message delivery semantics or place paths, credentials, or complete memory
+stores in broker messages.
+
+The current orchestration is intentionally small: one configured peer, one
+request followed by at most one authoritative result, caller polling, and
+read-only execution. Multi-party discussions, push notifications, streamed
+partial answers, writable tasks, dynamic executor selection, and durable
+cross-project conversational memory are not implemented.
+
 ## Delivery Semantics
 
 Delivery is at least once.
@@ -24,6 +84,24 @@ Delivery is at least once.
 No distributed transaction exists across SQLite, Azure Service Bus, and an
 agent's external side effects. The system must never claim exactly-once
 execution.
+
+For read-only dispatch, result enqueue and inbox settlement are one fenced
+SQLite transaction. The transaction verifies the unexpired claim token,
+inserts or reuses the deterministic result, records the result identity, and
+marks the request processed or rejected. A stale dispatcher cannot publish
+after another consumer reclaims the task. Codex inspection itself remains
+at-least-once because a crash before settlement may cause the read-only work to
+run again.
+
+An existing pending, leased, or sent deterministic result is authoritative
+after crash recovery. A quarantined or expired prior result is not reused as a
+successful reply; the dispatcher rejects the request through a separate
+deliverable failure result.
+
+The dispatcher renews its local claim while Codex runs. Claim-renewal failure
+or process shutdown cancels the child process tree and leaves the request
+recoverable after lease expiry. Windows cancellation is not reported complete
+until `taskkill /T /F` succeeds and the launched process closes.
 
 ## Azure Topology
 
