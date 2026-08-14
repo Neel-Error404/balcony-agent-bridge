@@ -57,6 +57,19 @@ Recalculate and reapprove the wrapper SHA-256 after every Codex CLI update.
 
 ## Foreground Acceptance
 
+Before and after any foreground bridge or service acceptance, verify that one
+canonical bridge worker owns the machine-wide lock:
+
+```powershell
+pwsh -NoProfile -File scripts/Test-BridgeRuntimeSafety.ps1 -SystemId SYS-A
+```
+
+Use `SYS-B` on the peer machine. A failure such as
+`BRIDGE_WORKER_COUNT_2`, `manual-or-orphaned`, or
+`WORKER_LOCK_OWNER_MISMATCH` blocks acceptance. Stop only the specifically
+identified orphan after explicit process-mutation approval. Never leave a
+foreground `dist/bridge/index.js` process running beside the Windows service.
+
 1. Build the repository.
 2. Start `npm run start:dispatcher` under the intended Windows user.
 3. Confirm the dispatcher heartbeat appears in `bridge:status`.
@@ -75,6 +88,12 @@ Recalculate and reapprove the wrapper SHA-256 after every Codex CLI update.
 13. Quarantine a synthetic prior deterministic result and confirm the request
     is rejected through a separate pending failure result rather than marked
     processed without a deliverable reply.
+14. Continue a completed result twice with the same idempotency key and confirm
+    both calls return one follow-up at the same sequence number.
+15. Complete at least two follow-up turns and confirm the dispatcher receives
+    only bounded prior context from the same project.
+16. Attempt a stale parallel continuation or cross-project continuation and
+    confirm it fails before another request is persisted.
 
 ## Background Activation Gate
 
@@ -89,6 +108,20 @@ Do not install automatic startup until the owner selects one of these modes:
 The restricted account must have read access only to approved project trees,
 write access only to the bridge SQLite data directory and required temporary
 locations, and no access to unrelated user profiles or machine credentials.
+
+For true unattended operation, use the Windows service mode on both machines.
+User-session startup is useful for foreground acceptance but is not always-on
+when the user is logged out. Selecting or creating the restricted service
+identity, granting project and runtime ACLs, and provisioning its dedicated
+noninteractive Codex authentication home remain explicit machine-local owner
+actions. Source approval does not by itself authorize those operating-system
+changes.
+
+After both services use the same exact source revision, acceptance requires an
+unattended request/result round trip in each direction and at least two
+follow-up turns in each conversation. Broker send acknowledgement is not peer
+execution evidence; verify the peer inbox, dispatcher claim/result, return
+delivery, and caller-visible result chain.
 
 Do not place passwords, API keys, access tokens, or copied interactive login
 material in WinSW XML, Task Scheduler arguments, repository files, Obsidian,

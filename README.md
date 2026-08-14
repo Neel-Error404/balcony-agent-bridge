@@ -38,10 +38,10 @@ is a physical Windows host and uses the approved certificate-backed Entra
 application. Azure Arc is not used. Live SYS-A certificate authentication,
 topic send, filtered subscription receive, PeekLock completion, durable
 SQLite processing, and the original nine MCP tools are verified in the live
-deployment. The local implementation now exposes eleven tools, including the
-new high-level coordination pair; those additions still require the full
-release and SYS-B acceptance gates below. Codex has the local MCP registration
-without Azure credentials.
+deployment. The current source candidate exposes thirteen tools, including
+high-level ask, result, continue, and thread operations; those additions still
+require the full release and SYS-B acceptance gates below. Codex has the local
+MCP registration without Azure credentials.
 
 The SYS-A Windows service is installed with the owner-approved WinSW v2.12.0
 x64 wrapper, starts automatically, and reports a healthy heartbeat. Restart,
@@ -69,6 +69,11 @@ request and immediately returns a `task_id`. Repeating the same logical request
 with the same idempotency key returns the original task. The caller uses
 `agent_bridge_get_result` to observe `queued`, `waiting`, `completed`,
 `rejected`, or `failed` state and retrieve the linked result when it arrives.
+After a completed result, `agent_bridge_continue_agent` creates the next turn
+without allowing the caller to change the project or causal chain.
+`agent_bridge_get_thread` returns a bounded ordered local view of the
+discussion. Requests and results advance a single conversation sequence, and
+only the latest completed result can be continued.
 
 This API is independent of Azure Service Bus and Codex at the contract layer.
 The coordination envelope, SQLite state, idempotency, and result linkage do not
@@ -76,10 +81,12 @@ know which broker or agent runtime is underneath them. Azure Service Bus is the
 only production transport adapter today, and the optional dispatcher supports
 only bounded Codex CLI read-only execution.
 
-The bridge does not currently synchronize project memory, repository files, or
-conversation databases. The receiving agent inspects one locally allowlisted
-project and returns a bounded answer. Git remains the code/document transfer
-mechanism. A GitHub, HTTP, filesystem, LangGraph Store, Letta, or other memory
+The bridge does not synchronize project memory, repository files, or external
+conversation databases. Multi-turn context is reconstructed only from bounded
+validated requests and results already present in the machine-local bridge
+database. The receiving agent re-inspects one locally allowlisted project for
+current-state claims. Git remains the code/document transfer mechanism. A
+GitHub, HTTP, filesystem snapshot, LangGraph Store, Letta, or other memory
 connector would be a separate adapter behind the project/context boundary; it
 must not be embedded into the coordination envelope or trusted as project truth
 without its own authorization and evidence rules.

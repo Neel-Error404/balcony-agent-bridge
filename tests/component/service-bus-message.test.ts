@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { createEnvelope } from "../../src/contracts/envelope.js";
 import {
-  createSessionAcceptWait,
+  ServiceBusBridgeTransport,
+  type ServiceBusClientAdapter,
+  type ServiceBusClientFactory,
   toServiceBusMessage,
 } from "../../src/transport/service-bus-transport.js";
+import type { BridgeConfig } from "../../src/config.js";
 
 describe("Service Bus message mapping", () => {
   it("uses stable IDs, sessions, routing properties, and bounded TTL", () => {
@@ -38,47 +41,115 @@ describe("Service Bus message mapping", () => {
   });
 });
 
-describe("Service Bus session polling", () => {
-  it("aborts a session accept after the bounded poll interval", async () => {
-    const wait = createSessionAcceptWait(undefined, 10);
-    try {
-      await onceAborted(wait.signal);
-      expect(wait.timedOut()).toBe(true);
-    } finally {
-      wait.dispose();
-    }
+describe("Service Bus transport lanes", () => {
+  it("keeps outbound delivery independent from a stalled session accept", async () => {
+    const harness = clientHarness();
+    const transport = new ServiceBusBridgeTransport(
+      bridgeConfig(),
+      undefined,
+      harness.factory,
+    );
+    const envelope = createEnvelope({
+      idempotencyKey: "independent-outbound",
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "message",
+      streamId: "transport-test",
+      payload: {
+        subject: "Outbound remains live",
+        body: "The receive client must not starve the sender.",
+        evidence: [],
+      },
+    });
+
+    const controller = new AbortController();
+    const receive = transport.receiveAvailable(async () => undefined, {
+      abortSignal: controller.signal,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await transport.send(envelope);
+
+    expect(harness.acceptStarted()).toBe(true);
+    expect(harness.sentMessageCount()).toBe(1);
+    controller.abort();
+    await expect(receive).resolves.toBe(0);
+    await transport.close();
+    expect(harness.roles).toEqual(["sender", "receiver"]);
   });
 
-  it("propagates service shutdown without reporting a poll timeout", async () => {
-    const parent = new AbortController();
-    const wait = createSessionAcceptWait(parent.signal, 1000);
-    try {
-      parent.abort();
-      await onceAborted(wait.signal);
-      expect(wait.timedOut()).toBe(false);
-    } finally {
-      wait.dispose();
-    }
-  });
+  it("rejects overlapping receives on the same session client", async () => {
+    const harness = clientHarness();
+    const transport = new ServiceBusBridgeTransport(
+      bridgeConfig(),
+      undefined,
+      harness.factory,
+    );
+    const controller = new AbortController();
+    const first = transport.receiveAvailable(async () => undefined, {
+      abortSignal: controller.signal,
+    });
 
-  it("cancels the poll timeout after a session is accepted", async () => {
-    const wait = createSessionAcceptWait(undefined, 10);
-    try {
-      wait.clearTimeout();
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      expect(wait.signal.aborted).toBe(false);
-      expect(wait.timedOut()).toBe(false);
-    } finally {
-      wait.dispose();
-    }
+    await expect(
+      transport.receiveAvailable(async () => undefined),
+    ).rejects.toThrow("already in progress");
+
+    controller.abort();
+    await expect(first).resolves.toBe(0);
+    await transport.close();
   });
 });
 
-async function onceAborted(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
+function bridgeConfig(): BridgeConfig {
+  return {
+    systemId: "SYS-A",
+    peerSystemId: "SYS-B",
+    databasePath: ":memory:",
+    topicName: "agent-messages",
+    subscriptionName: "sys-a",
+    azureAuthMode: "managed_identity",
+  };
+}
+
+function clientHarness() {
+  const roles: Array<"sender" | "receiver"> = [];
+  let sentMessages = 0;
+  let didStartAccept = false;
+
+  const factory: ServiceBusClientFactory = (role) => {
+    roles.push(role);
+    let rejectAccept: ((error: Error) => void) | undefined;
+    const adapter = {
+      createSender: () => ({
+        sendMessages: async () => {
+          sentMessages += 1;
+        },
+        close: async () => undefined,
+      }),
+      acceptNextSession: (
+        _topic: string,
+        _subscription: string,
+        options?: { abortSignal?: AbortSignal },
+      ) =>
+        new Promise((_resolve, reject) => {
+          didStartAccept = true;
+          rejectAccept = reject;
+          options?.abortSignal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        }),
+      close: async () => {
+        rejectAccept?.(new Error("closed"));
+      },
+    };
+    return adapter as unknown as ServiceBusClientAdapter;
+  };
+
+  return {
+    factory,
+    roles,
+    acceptStarted: () => didStartAccept,
+    sentMessageCount: () => sentMessages,
+  };
 }

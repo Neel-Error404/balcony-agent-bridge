@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AgentBridgeService } from "../../src/application/agent-bridge-service.js";
 import type { BridgeConfig } from "../../src/config.js";
+import { createEnvelope } from "../../src/contracts/envelope.js";
 import { createMcpServer } from "../../src/mcp/server.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
 
@@ -71,6 +72,57 @@ describe("coordination security boundary", () => {
       "STATE_TRANSITION_ERROR",
     );
     expect(JSON.stringify(response.content)).not.toContain(privateTaskId);
+  });
+
+  it("rejects a follow-up when the peer changes the thread project", async () => {
+    const askResponse = await client.callTool({
+      name: "agent_bridge_ask_agent",
+      arguments: {
+        idempotency_key: "project-boundary-request",
+        project_id: "voiceai",
+        subject: "Inspect VoiceAI",
+        request: "Report current state.",
+      },
+    });
+    const ask = askResponse.structuredContent as {
+      task_id: string;
+      conversation_id: string;
+    };
+    const mismatchedResult = createEnvelope({
+      idempotencyKey: "project-boundary-result",
+      originSystem: "SYS-B",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: ask.conversation_id,
+      causationId: ask.task_id,
+      sequenceNumber: 1,
+      payload: {
+        subject: "Mismatched result",
+        body: "This result changed projects.",
+        project: "trading",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: ask.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(mismatchedResult, 1);
+
+    const response = await client.callTool({
+      name: "agent_bridge_continue_agent",
+      arguments: {
+        idempotency_key: "project-boundary-follow-up",
+        previous_result_message_id: mismatchedResult.message_id,
+        subject: "Continue",
+        request: "Continue the discussion.",
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    expect(database.getStatus().outbox.pending).toBe(1);
   });
 });
 

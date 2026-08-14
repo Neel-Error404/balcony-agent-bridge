@@ -137,6 +137,33 @@ describe("AgentBridgeService", () => {
       },
     });
   });
+
+  it("rejects starting a new task inside an existing conversation", () => {
+    const conversationId = "33333333-3333-4333-8333-333333333333";
+    service.send({
+      idempotencyKey: "existing-conversation",
+      kind: "message",
+      streamId: "manual",
+      conversationId,
+      payload: {
+        subject: "Existing turn",
+        body: "This conversation already exists.",
+        evidence: [],
+      },
+    });
+
+    expect(() =>
+      service.askAgent({
+        idempotencyKey: "invalid-new-turn",
+        projectId: "voiceai-platform",
+        subject: "Do not fork",
+        request: "This must use the continuation operation instead.",
+        intent: "question",
+        timeoutSeconds: 120,
+        conversationId,
+      }),
+    ).toThrow("cannot reuse an existing conversation");
+  });
 });
 
 function incomingEnvelope() {

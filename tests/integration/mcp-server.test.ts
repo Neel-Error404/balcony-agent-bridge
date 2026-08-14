@@ -48,8 +48,10 @@ describe("MCP server", () => {
         "agent_bridge_ask_agent",
         "agent_bridge_claim",
         "agent_bridge_complete",
+        "agent_bridge_continue_agent",
         "agent_bridge_fail",
         "agent_bridge_get_result",
+        "agent_bridge_get_thread",
         "agent_bridge_list_inbox",
         "agent_bridge_read",
         "agent_bridge_renew_claim",
@@ -115,6 +117,7 @@ describe("MCP server", () => {
       streamId: "agent-coordination",
       conversationId: first.conversation_id,
       causationId: first.task_id,
+      sequenceNumber: 1,
       payload: {
         subject: "VoiceAI inspection complete",
         body: "The approved checks pass.",
@@ -146,6 +149,41 @@ describe("MCP server", () => {
       result_message_id: result.message_id,
       result: { body: "The approved checks pass." },
     });
+
+    const followUp = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_continue_agent",
+        arguments: {
+          idempotency_key: "mcp-coordinate-follow-up-1",
+          previous_result_message_id: result.message_id,
+          subject: "Clarify evidence",
+          request: "Which checks support the answer?",
+          timeout_seconds: 120,
+        },
+      }),
+    ) as {
+      task_id: string;
+      conversation_id: string;
+      sequence_number: number;
+    };
+    expect(followUp).toMatchObject({
+      conversation_id: first.conversation_id,
+      sequence_number: 2,
+    });
+
+    const thread = toolOutput(
+      await client.callTool({
+        name: "agent_bridge_get_thread",
+        arguments: {
+          conversation_id: first.conversation_id,
+          limit: 20,
+        },
+      }),
+    ) as { count: number; items: Array<{ message_id: string }> };
+    expect(thread.count).toBe(3);
+    expect(thread.items.map((item) => item.message_id)).toContain(
+      followUp.task_id,
+    );
   });
 
   it("durably enqueues through MCP and reports local status", async () => {

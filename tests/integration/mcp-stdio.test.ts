@@ -53,11 +53,13 @@ describe("MCP stdio process", () => {
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(11);
+      expect(tools.tools).toHaveLength(13);
       expect(tools.tools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
           "agent_bridge_ask_agent",
+          "agent_bridge_continue_agent",
           "agent_bridge_get_result",
+          "agent_bridge_get_thread",
         ]),
       );
       const status = await client.callTool({

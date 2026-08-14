@@ -29,8 +29,9 @@ modify Azure, or inherit normal user MCP servers and hooks.
 2. Pull the approved SHA with `--ff-only`.
 3. Run Foundation, Component, Integration, Workflow, Recovery, and Security in
    that order.
-4. Confirm the MCP server exposes eleven tools, including
-   `agent_bridge_ask_agent` and `agent_bridge_get_result`.
+4. Confirm the MCP server exposes thirteen tools, including
+   `agent_bridge_ask_agent`, `agent_bridge_get_result`,
+   `agent_bridge_continue_agent`, and `agent_bridge_get_thread`.
 5. Run typecheck, build, dependency audit, and MCP smoke.
 6. Create a machine-local project registry outside Git.
 7. Mark only whole-project trees approved for peer inspection with
@@ -49,7 +50,10 @@ modify Azure, or inherit normal user MCP servers and hooks.
 14. Confirm claim renewal and child cancellation during dispatcher shutdown.
 15. Confirm repository files, Git state, Azure state, and machine configuration
     remain unchanged.
-16. Return secret-safe evidence and an `accept`, `amend`, or `reject` decision.
+16. Complete at least two serialized follow-up turns and confirm sequence,
+    causation, one-project enforcement, bounded prior context, and duplicate
+    continuation idempotency.
+17. Return secret-safe evidence and an `accept`, `amend`, or `reject` decision.
 
 Automatic startup is a separate owner gate. Do not create a scheduled task,
 Windows service, service account, or machine-level Codex configuration without

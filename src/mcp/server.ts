@@ -137,6 +137,65 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
   );
 
   server.registerTool(
+    "agent_bridge_continue_agent",
+    {
+      title: "Continue Peer Agent Discussion",
+      description:
+        "Create the next bounded read-only turn after a completed peer result. The bridge preserves the project, conversation, causation, and sequence chain.",
+      inputSchema: {
+        idempotency_key: z.string().trim().min(1).max(128),
+        previous_result_message_id: z.string().uuid(),
+        subject: z.string().trim().min(1).max(200),
+        request: z.string().trim().min(1).max(12_000),
+        intent: CoordinationIntentSchema.default("question"),
+        timeout_seconds: z.number().int().min(30).max(600).default(300),
+        expires_at_utc: z.string().datetime({ offset: true }).optional(),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input) =>
+      toolResult(() =>
+        service.continueAgent({
+          idempotencyKey: input.idempotency_key,
+          previousResultMessageId: input.previous_result_message_id,
+          subject: input.subject,
+          request: input.request,
+          intent: input.intent,
+          timeoutSeconds: input.timeout_seconds,
+          ...(input.expires_at_utc
+            ? { expiresAtUtc: input.expires_at_utc }
+            : {}),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "agent_bridge_get_thread",
+    {
+      title: "Get Peer Agent Discussion",
+      description:
+        "Return a bounded ordered view of a local coordination conversation created by this system.",
+      inputSchema: {
+        conversation_id: z.string().uuid(),
+        limit: z.number().int().min(1).max(100).default(20),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ conversation_id, limit }) =>
+      toolResult(() => service.getAgentThread(conversation_id, limit)),
+  );
+
+  server.registerTool(
     "agent_bridge_list_inbox",
     {
       title: "List Agent Bridge Inbox",

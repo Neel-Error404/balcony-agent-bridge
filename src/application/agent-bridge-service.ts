@@ -46,6 +46,16 @@ export interface AskAgentInput {
   expiresAtUtc?: string;
 }
 
+export interface ContinueAgentInput {
+  idempotencyKey: string;
+  previousResultMessageId: string;
+  subject: string;
+  request: string;
+  intent: CoordinationIntent;
+  timeoutSeconds: number;
+  expiresAtUtc?: string;
+}
+
 export class AgentBridgeService {
   public constructor(
     private readonly config: BridgeConfig,
@@ -93,6 +103,14 @@ export class AgentBridgeService {
   }
 
   public askAgent(input: AskAgentInput) {
+    if (
+      input.conversationId &&
+      this.database.listConversation(input.conversationId, 1).length > 0
+    ) {
+      throw new StateTransitionError(
+        "A new coordination request cannot reuse an existing conversation",
+      );
+    }
     const request = this.send({
       idempotencyKey: input.idempotencyKey,
       kind: "task_request",
@@ -113,6 +131,7 @@ export class AgentBridgeService {
           access_mode: "read_only",
         },
       },
+      sequenceNumber: 0,
       ...(input.conversationId
         ? { conversationId: input.conversationId }
         : {}),
@@ -126,6 +145,156 @@ export class AgentBridgeService {
       status: request.state === "sent" ? "waiting" : "queued",
       delivery_state: request.state,
       queued_at_utc: request.queued_at_utc,
+    };
+  }
+
+  public continueAgent(input: ContinueAgentInput) {
+    const previous = this.database.getInboxMessage(
+      input.previousResultMessageId,
+    );
+    const resultMetadata =
+      previous?.envelope.payload.coordination_result;
+    if (
+      !previous ||
+      previous.envelope.kind !== "task_result" ||
+      previous.envelope.origin_system !== this.config.peerSystemId ||
+      !resultMetadata ||
+      resultMetadata.outcome !== "completed"
+    ) {
+      throw new StateTransitionError(
+        "The previous result is not a completed peer coordination result",
+      );
+    }
+    const priorRequest = this.database.getOutboxMessage(
+      resultMetadata.request_message_id,
+    );
+    const projectId = priorRequest?.envelope.payload.project;
+    if (
+      !priorRequest ||
+      priorRequest.envelope.kind !== "task_request" ||
+      !priorRequest.envelope.payload.coordination_request ||
+      priorRequest.envelope.conversation_id !==
+        previous.envelope.conversation_id ||
+      !projectId
+    ) {
+      throw new StateTransitionError(
+        "The previous result is not linked to a local coordination request",
+      );
+    }
+    const thread = this.database.listConversation(
+      previous.envelope.conversation_id,
+      100,
+    );
+    const existingFollowUp = this.database.getOutboxByIdempotency(
+      this.config.peerSystemId,
+      input.idempotencyKey,
+    );
+    const latest = thread.at(-1)?.envelope;
+    if (
+      !existingFollowUp &&
+      latest?.message_id !== previous.envelope.message_id
+    ) {
+      throw new StateTransitionError(
+        "The coordination thread already contains a newer turn",
+      );
+    }
+    for (const item of thread) {
+      if (
+        (item.envelope.payload.coordination_request ||
+          item.envelope.payload.coordination_result) &&
+        item.envelope.payload.project &&
+        item.envelope.payload.project !== projectId
+      ) {
+        throw new StateTransitionError(
+          "The coordination thread contains more than one project",
+        );
+      }
+    }
+    const nextSequence =
+      existingFollowUp?.envelope.sequence_number ??
+      Math.max(
+        -1,
+        ...thread.map((item) => item.envelope.sequence_number ?? -1),
+      ) +
+        1;
+    const followUp = this.send({
+      idempotencyKey: input.idempotencyKey,
+      kind: "task_request",
+      streamId: "agent-coordination",
+      conversationId: previous.envelope.conversation_id,
+      causationId: previous.envelope.message_id,
+      sequenceNumber: nextSequence,
+      payload: {
+        subject: input.subject,
+        body: input.request,
+        project: projectId,
+        evidence: [],
+        dispatch: {
+          executor: "codex_cli",
+          access: "read_only",
+          timeout_seconds: input.timeoutSeconds,
+        },
+        coordination_request: {
+          protocol_version: COORDINATION_PROTOCOL_VERSION,
+          intent: input.intent,
+          access_mode: "read_only",
+        },
+      },
+      ...(input.expiresAtUtc ? { expiresAtUtc: input.expiresAtUtc } : {}),
+    });
+    return {
+      accepted: followUp.accepted,
+      duplicate: followUp.duplicate,
+      task_id: followUp.message_id,
+      conversation_id: followUp.conversation_id,
+      previous_result_message_id: previous.envelope.message_id,
+      status: followUp.state === "sent" ? "waiting" : "queued",
+      delivery_state: followUp.state,
+      sequence_number: nextSequence,
+      queued_at_utc: followUp.queued_at_utc,
+    };
+  }
+
+  public getAgentThread(
+    conversationId: string,
+    limit: number,
+  ): Record<string, unknown> {
+    const completeThread = this.database.listConversation(
+      conversationId,
+      100,
+    );
+    const ownsThread = completeThread.some(
+      (item) =>
+        item.direction === "outbound" &&
+        item.envelope.kind === "task_request" &&
+        item.envelope.stream_id === "agent-coordination" &&
+        Boolean(item.envelope.payload.coordination_request),
+    );
+    if (!ownsThread) {
+      throw new StateTransitionError(
+        `Coordination thread '${conversationId}' does not exist`,
+      );
+    }
+    const items = completeThread.slice(-limit);
+    return {
+      conversation_id: conversationId,
+      count: items.length,
+      items: items.map((item) => ({
+        message_id: item.envelope.message_id,
+        direction: item.direction,
+        state: item.state,
+        origin_system: item.envelope.origin_system,
+        target_system: item.envelope.target_system,
+        kind: item.envelope.kind,
+        sequence_number: item.envelope.sequence_number,
+        causation_id: item.envelope.causation_id,
+        subject: item.envelope.payload.subject,
+        body: item.envelope.payload.body,
+        project: item.envelope.payload.project,
+        coordination_outcome:
+          item.envelope.payload.coordination_result?.outcome,
+        created_at_utc: item.envelope.created_at_utc,
+      })),
     };
   }
 
@@ -344,6 +513,7 @@ export class AgentBridgeService {
       streamId: original.envelope.stream_id,
       conversationId: original.envelope.conversation_id,
       causationId: original.envelope.message_id,
+      sequenceNumber: (original.envelope.sequence_number ?? 0) + 1,
       payload,
       ...(original.envelope.correlation_id
         ? { correlationId: original.envelope.correlation_id }

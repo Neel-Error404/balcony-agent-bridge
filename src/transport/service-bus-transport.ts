@@ -7,6 +7,7 @@ import {
   ServiceBusError,
   RetryMode,
   type ServiceBusMessage,
+  type ServiceBusSender,
   type ServiceBusSessionReceiver,
 } from "@azure/service-bus";
 import type { TokenCredential } from "@azure/core-auth";
@@ -21,29 +22,41 @@ import type {
 } from "./transport.js";
 
 export class ServiceBusBridgeTransport implements BridgeTransport {
-  private readonly client: ServiceBusClient;
-  private readonly sender;
+  private readonly clientFactory: ServiceBusClientFactory;
+  private readonly senderClient: ServiceBusClientAdapter;
+  private readonly sender: ServiceBusSenderAdapter;
+  private readonly receiverClient: ServiceBusClientAdapter;
+  private receiveInProgress = false;
+  private closed = false;
 
   public constructor(
     private readonly config: BridgeConfig,
     credential?: TokenCredential,
+    clientFactory?: ServiceBusClientFactory,
   ) {
-    const azureCredential =
-      credential ?? createServiceBusCredential(config);
-    this.client = new ServiceBusClient(
-      requireServiceBusNamespace(config),
-      azureCredential,
-      {
-        identifier: `balcony-agent-bridge-${config.systemId.toLowerCase()}`,
-        retryOptions: {
-          maxRetries: 3,
-          retryDelayInMs: 1000,
-          maxRetryDelayInMs: 10_000,
-          mode: RetryMode.Exponential,
-        },
-      },
-    );
-    this.sender = this.client.createSender(config.topicName, {
+    if (clientFactory) {
+      this.clientFactory = clientFactory;
+    } else {
+      const azureCredential =
+        credential ?? createServiceBusCredential(config);
+      const namespace = requireServiceBusNamespace(config);
+      this.clientFactory = (role) =>
+        new ServiceBusClient(namespace, azureCredential, {
+          identifier:
+            `balcony-agent-bridge-${role}-` +
+            config.systemId.toLowerCase(),
+          retryOptions: {
+            maxRetries: role === "receiver" ? 0 : 3,
+            retryDelayInMs: 1000,
+            maxRetryDelayInMs: 10_000,
+            timeoutInMs: role === "receiver" ? 30_000 : 10_000,
+            mode: RetryMode.Exponential,
+          },
+        });
+    }
+    this.senderClient = this.clientFactory("sender");
+    this.receiverClient = this.clientFactory("receiver");
+    this.sender = this.senderClient.createSender(config.topicName, {
       identifier: `balcony-agent-bridge-sender-${config.systemId.toLowerCase()}`,
     });
   }
@@ -60,22 +73,26 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       abortSignal?: AbortSignal;
     },
   ): Promise<number> {
+    if (this.closed) {
+      throw new Error("The Service Bus transport is closed");
+    }
+    if (this.receiveInProgress) {
+      throw new Error("A Service Bus receive cycle is already in progress");
+    }
+    this.receiveInProgress = true;
     let receiver: ServiceBusSessionReceiver | undefined;
-    const acceptWait = createSessionAcceptWait(
-      options?.abortSignal,
-      options?.maximumWaitTimeMs ?? 5000,
-    );
     try {
-      receiver = await this.client.acceptNextSession(
+      receiver = await this.receiverClient.acceptNextSession(
         this.config.topicName,
         this.config.subscriptionName,
         {
           receiveMode: "peekLock",
           maxAutoLockRenewalDurationInMs: 5 * 60 * 1000,
-          abortSignal: acceptWait.signal,
+          ...(options?.abortSignal
+            ? { abortSignal: options.abortSignal }
+            : {}),
         },
       );
-      acceptWait.clearTimeout();
       const messages = await receiver.receiveMessages(
         options?.maximumMessages ?? 10,
         {
@@ -103,7 +120,7 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       }
       return messages.length;
     } catch (error) {
-      if (acceptWait.timedOut() || options?.abortSignal?.aborted) {
+      if (options?.abortSignal?.aborted) {
         return 0;
       }
       if (
@@ -115,66 +132,35 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       }
       throw error;
     } finally {
-      acceptWait.dispose();
       await receiver?.close();
+      this.receiveInProgress = false;
     }
   }
 
   public async close(): Promise<void> {
+    this.closed = true;
     await this.sender.close();
-    await this.client.close();
+    await Promise.all([
+      this.senderClient.close(),
+      this.receiverClient.close(),
+    ]);
   }
 }
 
-interface SessionAcceptWait {
-  signal: AbortSignal;
-  timedOut(): boolean;
-  clearTimeout(): void;
-  dispose(): void;
+type ServiceBusSenderAdapter = Pick<
+  ServiceBusSender,
+  "sendMessages" | "close"
+>;
+
+export interface ServiceBusClientAdapter {
+  createSender: ServiceBusClient["createSender"];
+  acceptNextSession: ServiceBusClient["acceptNextSession"];
+  close(): Promise<void>;
 }
 
-export function createSessionAcceptWait(
-  parentSignal: AbortSignal | undefined,
-  maximumWaitTimeMs: number,
-): SessionAcceptWait {
-  if (!Number.isFinite(maximumWaitTimeMs) || maximumWaitTimeMs <= 0) {
-    throw new RangeError("maximumWaitTimeMs must be a positive finite number");
-  }
-
-  const controller = new AbortController();
-  let didTimeOut = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const abortFromParent = (): void => controller.abort(parentSignal?.reason);
-
-  if (parentSignal?.aborted) {
-    abortFromParent();
-  } else {
-    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
-  }
-
-  timeout = setTimeout(() => {
-    didTimeOut = true;
-    controller.abort();
-  }, maximumWaitTimeMs);
-  timeout.unref?.();
-
-  const clearAcceptTimeout = (): void => {
-    if (timeout) {
-      clearTimeout(timeout);
-      timeout = undefined;
-    }
-  };
-
-  return {
-    signal: controller.signal,
-    timedOut: () => didTimeOut,
-    clearTimeout: clearAcceptTimeout,
-    dispose: () => {
-      clearAcceptTimeout();
-      parentSignal?.removeEventListener("abort", abortFromParent);
-    },
-  };
-}
+export type ServiceBusClientFactory = (
+  role: "sender" | "receiver",
+) => ServiceBusClientAdapter;
 
 export function createServiceBusCredential(
   config: BridgeConfig,

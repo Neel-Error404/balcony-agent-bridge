@@ -9,6 +9,19 @@ The MCP server validates requests and performs short SQLite transactions. It
 does not connect to Azure. The bridge service is the only process allowed to
 authenticate to Azure Service Bus.
 
+The bridge runtime has independent lanes. The inbound lane may remain inside
+Service Bus's session-accept long poll while the outbound lane continues to
+lease and send local work and refresh the runtime heartbeat. The sender and
+session receiver use separate Service Bus clients. Idle receiving therefore
+cannot starve queued outbound work. Shutdown is separately bounded because an
+SDK session accept or client close may not honor cancellation promptly.
+
+Exactly one bridge transport worker may run for each machine identity. The
+process acquires a machine-wide worker lock before opening SQLite or Service
+Bus. A second live worker fails closed, while a lock left by a process that no
+longer exists is reclaimed. This prevents competing receivers from consuming
+the same subscription into different local state stores.
+
 The optional read-only dispatcher is a third local process. It shares the
 SQLite database, claims only explicitly routed read-only Codex tasks, and never
 connects to Azure. Codex execution does not occur inside the broker receive
@@ -47,6 +60,17 @@ The durable transaction is:
 4. The peer publishes one causally linked task result.
 5. `agent_bridge_get_result` finds that result in the local inbox without
    requiring broker access.
+6. `agent_bridge_continue_agent` may create the next turn only from the latest
+   completed peer result, preserving the project and conversation.
+7. `agent_bridge_get_thread` returns a bounded ordered local view.
+
+The turn chain is `request seq0 -> result seq1 -> follow-up seq2 -> result
+seq3`. Every response is caused by its request; every follow-up is caused by
+the preceding result. Reusing an idempotency key returns the same turn, while
+parallel or stale continuations fail closed. The dispatcher receives at most
+eight prior validated coordination messages and 8,000 context characters. It
+is instructed to treat prior text as discussion data and re-inspect local
+evidence for current-state claims.
 
 `BridgeTransport` is the narrow transfer seam: send one envelope, receive
 available deliveries, and close. Service Bus is the only production adapter;
@@ -63,11 +87,11 @@ connector should produce bounded evidence for an executor; it should not change
 message delivery semantics or place paths, credentials, or complete memory
 stores in broker messages.
 
-The current orchestration is intentionally small: one configured peer, one
-request followed by at most one authoritative result, caller polling, and
-read-only execution. Multi-party discussions, push notifications, streamed
-partial answers, writable tasks, dynamic executor selection, and durable
-cross-project conversational memory are not implemented.
+The current orchestration is intentionally small: one configured peer,
+serialized bounded turns inside one project, caller polling, and read-only
+execution. Multi-party discussions, push notifications, streamed partial
+answers, writable tasks, dynamic executor selection, and durable cross-project
+conversational memory are not implemented.
 
 ## Delivery Semantics
 

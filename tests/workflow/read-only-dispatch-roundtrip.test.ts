@@ -139,6 +139,97 @@ describe("read-only dispatch round trip", () => {
     });
     expect(sysBDatabase.getStatus().inbox.processed).toBe(1);
     expect(sysADatabase.getStatus().inbox.available).toBe(1);
+
+    const followUp = sysAService.continueAgent({
+      idempotencyKey: "workflow-read-only-follow-up",
+      previousResultMessageId: resultEnvelope.message_id,
+      subject: "Clarify VoiceAI evidence",
+      request: "Which evidence supports that conclusion?",
+      intent: "question",
+      timeoutSeconds: 120,
+    });
+    const duplicateFollowUp = sysAService.continueAgent({
+      idempotencyKey: "workflow-read-only-follow-up",
+      previousResultMessageId: resultEnvelope.message_id,
+      subject: "Clarify VoiceAI evidence",
+      request: "Which evidence supports that conclusion?",
+      intent: "question",
+      timeoutSeconds: 120,
+    });
+    expect(duplicateFollowUp).toMatchObject({
+      task_id: followUp.task_id,
+      conversation_id: followUp.conversation_id,
+      duplicate: true,
+      sequence_number: 2,
+    });
+    await sysAWorker.runOutboundOnce();
+    const followUpEnvelope = sysATransport.sent[1]!;
+    sysBTransport.queueInbound({
+      body: followUpEnvelope,
+      brokerMessageId: followUp.task_id as string,
+      sessionId: followUpEnvelope.conversation_id,
+    });
+    await sysBWorker.runInboundOnce();
+    expect(await dispatcher.runOnce()).toBe(1);
+    expect(executor.inputs).toHaveLength(2);
+    expect(executor.inputs[1]?.prompt).toContain("Prior discussion:");
+    expect(executor.inputs[1]?.prompt).toContain(
+      "VoiceAI is present, clean, and its approved tests pass.",
+    );
+    expect(executor.inputs[1]?.prompt).toContain(
+      "Which evidence supports that conclusion?",
+    );
+
+    await sysBWorker.runOutboundOnce();
+    const followUpResultEnvelope = sysBTransport.sent[1]!;
+    sysATransport.queueInbound({
+      body: followUpResultEnvelope,
+      brokerMessageId: followUpResultEnvelope.message_id,
+      sessionId: followUpResultEnvelope.conversation_id,
+    });
+    await sysAWorker.runInboundOnce();
+
+    expect([
+      requestEnvelope.sequence_number,
+      resultEnvelope.sequence_number,
+      followUpEnvelope.sequence_number,
+      followUpResultEnvelope.sequence_number,
+    ]).toEqual([0, 1, 2, 3]);
+    expect(followUpEnvelope).toMatchObject({
+      conversation_id: request.conversation_id,
+      causation_id: resultEnvelope.message_id,
+      payload: { project: "voiceai" },
+    });
+    expect(followUpResultEnvelope).toMatchObject({
+      conversation_id: request.conversation_id,
+      causation_id: followUp.task_id,
+      payload: {
+        coordination_result: {
+          request_message_id: followUp.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    expect(
+      sysAService.getAgentThread(request.conversation_id as string, 20),
+    ).toMatchObject({
+      conversation_id: request.conversation_id,
+      count: 4,
+    });
+    expect(
+      sysAService.continueAgent({
+        idempotencyKey: "workflow-read-only-follow-up",
+        previousResultMessageId: resultEnvelope.message_id,
+        subject: "Clarify VoiceAI evidence",
+        request: "Which evidence supports that conclusion?",
+        intent: "question",
+        timeoutSeconds: 120,
+      }),
+    ).toMatchObject({
+      task_id: followUp.task_id,
+      duplicate: true,
+      sequence_number: 2,
+    });
   });
 
   function createDatabase(databasePath: string): BridgeDatabase {

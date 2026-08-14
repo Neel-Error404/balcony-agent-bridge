@@ -8,6 +8,7 @@ import {
   parseEnvelope,
   type BridgeEnvelope,
   type MessageKind,
+  type SystemId,
 } from "../contracts/envelope.js";
 import {
   DispatchResultUnavailableError,
@@ -89,6 +90,12 @@ export interface OutboxListItem {
   state: OutboxState;
 }
 
+export interface ConversationListItem {
+  envelope: BridgeEnvelope;
+  direction: "inbound" | "outbound";
+  state: InboxState | OutboxState;
+}
+
 export type AcknowledgeOutcome = "processed" | "rejected" | "retry";
 
 export interface BridgeStatus {
@@ -154,6 +161,84 @@ export class BridgeDatabase {
       envelope: parseEnvelope(JSON.parse(row.envelope_json)),
       state: row.state,
     };
+  }
+
+  public getOutboxByIdempotency(
+    targetSystem: SystemId,
+    idempotencyKey: string,
+  ): OutboxListItem | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM outbox
+         WHERE target_system = ? AND idempotency_key = ?`,
+      )
+      .get(targetSystem, idempotencyKey) as
+      | Pick<OutboxRow, "envelope_json" | "state">
+      | undefined;
+    if (!row) {
+      return undefined;
+    }
+    return {
+      envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+      state: row.state,
+    };
+  }
+
+  public listConversation(
+    conversationId: string,
+    limit = 20,
+  ): ConversationListItem[] {
+    assertPositiveInteger(limit, "limit");
+    if (limit > 100) {
+      throw new RangeError("limit must not exceed 100");
+    }
+    const outbound = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM outbox
+         WHERE json_extract(envelope_json, '$.conversation_id') = ?`,
+      )
+      .all(conversationId) as Array<{
+      envelope_json: string;
+      state: OutboxState;
+    }>;
+    const inbound = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM inbox
+         WHERE json_extract(envelope_json, '$.conversation_id') = ?`,
+      )
+      .all(conversationId) as Array<{
+      envelope_json: string;
+      state: InboxState;
+    }>;
+    return [
+      ...outbound.map((row) => ({
+        envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+        direction: "outbound" as const,
+        state: row.state,
+      })),
+      ...inbound.map((row) => ({
+        envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+        direction: "inbound" as const,
+        state: row.state,
+      })),
+    ]
+      .sort((left, right) => {
+        const leftSequence =
+          left.envelope.sequence_number ?? Number.MAX_SAFE_INTEGER;
+        const rightSequence =
+          right.envelope.sequence_number ?? Number.MAX_SAFE_INTEGER;
+        return (
+          leftSequence - rightSequence ||
+          left.envelope.created_at_utc.localeCompare(
+            right.envelope.created_at_utc,
+          ) ||
+          left.envelope.message_id.localeCompare(right.envelope.message_id)
+        );
+      })
+      .slice(-limit);
   }
 
   public findInboxReplyTo(

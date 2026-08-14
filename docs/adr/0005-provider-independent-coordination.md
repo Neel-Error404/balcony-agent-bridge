@@ -13,6 +13,9 @@ Expose a small high-level coordination API over the existing durable envelope:
   returns a stable task ID immediately.
 - `agent_bridge_get_result` reads local delivery state and returns the
   causally linked `task_result` when available.
+- `agent_bridge_continue_agent` serializes the next turn from the latest
+  completed result while preserving project and conversation identity.
+- `agent_bridge_get_thread` returns a bounded ordered local conversation view.
 
 Keep coordination, transfer, project context, and execution as separate
 boundaries. The coordination contract identifies intent and access mode. The
@@ -29,6 +32,12 @@ a conflict.
 Results are indexed locally by the original request's message ID. A versioned
 coordination result must repeat that ID, and validation requires it to match the
 envelope `causation_id`.
+
+Multi-turn discussions use the envelope's existing conversation, causation,
+and sequence fields rather than introducing a provider-owned thread object.
+Only one project is allowed per conversation. Prior bridge messages are
+bounded context, not project truth; the receiving agent must re-inspect the
+approved local project for current claims.
 
 ## Consequences
 
