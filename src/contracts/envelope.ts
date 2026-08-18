@@ -7,6 +7,7 @@ import {
   CoordinationRequestSchema,
   CoordinationResultSchema,
 } from "./coordination.js";
+import { ConsultationContextSchema } from "./consultation.js";
 
 export const SYSTEM_IDS = ["SYS-A", "SYS-B"] as const;
 export const MESSAGE_KINDS = [
@@ -36,6 +37,7 @@ export const ReadOnlyDispatchSchema = z
     executor: z.literal("codex_cli"),
     access: z.literal("read_only"),
     timeout_seconds: z.number().int().min(30).max(600).optional(),
+    evidence_mode: z.literal("pinned_git").optional(),
   })
   .strict();
 
@@ -50,6 +52,7 @@ export const MessagePayloadSchema = z
     dispatch: ReadOnlyDispatchSchema.optional(),
     coordination_request: CoordinationRequestSchema.optional(),
     coordination_result: CoordinationResultSchema.optional(),
+    consultation_context: ConsultationContextSchema.optional(),
   })
   .strict();
 
@@ -155,6 +158,44 @@ export const BridgeEnvelopeSchema = EnvelopeCoreSchema.superRefine(
           message:
             "coordination_result requires the agent-coordination stream",
           path: ["stream_id"],
+        });
+      }
+    }
+
+    if (value.payload.consultation_context) {
+      const consultation = value.payload.consultation_context;
+      if (!value.payload.coordination_request) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "consultation_context requires coordination_request",
+          path: ["payload", "consultation_context"],
+        });
+      }
+      if (value.correlation_id !== consultation.root_request_id) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "consultation_context root_request_id must match correlation_id",
+          path: [
+            "payload",
+            "consultation_context",
+            "root_request_id",
+          ],
+        });
+      }
+      if (
+        value.causation_id !== consultation.parent_request_id
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "consultation_context parent_request_id must match causation_id",
+          path: [
+            "payload",
+            "consultation_context",
+            "parent_request_id",
+          ],
         });
       }
     }

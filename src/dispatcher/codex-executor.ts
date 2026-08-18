@@ -8,6 +8,7 @@ import { sanitizeErrorMessage } from "../security/sanitize-error.js";
 
 export interface CodexExecutionInput {
   projectPath: string;
+  executionBoundary?: "project_read_only" | "evidence_only";
   prompt: string;
   timeoutSeconds: number;
   maxOutputBytes: number;
@@ -51,6 +52,18 @@ export class LocalCodexExecutor implements CodexExecutor {
       input.projectPath,
       "dispatcher project",
     );
+    const evidenceOnlyArguments =
+      input.executionBoundary === "evidence_only"
+        ? [
+            "--skip-git-repo-check",
+            "--disable",
+            "shell_tool",
+            "--disable",
+            "unified_exec",
+            "--disable",
+            "view_image",
+          ]
+        : [];
     const invocation = createInvocation(this.executable, [
       "--ask-for-approval",
       "never",
@@ -62,6 +75,7 @@ export class LocalCodexExecutor implements CodexExecutor {
       "read-only",
       "--color",
       "never",
+      ...evidenceOnlyArguments,
       "--cd",
       projectPath,
       "-",

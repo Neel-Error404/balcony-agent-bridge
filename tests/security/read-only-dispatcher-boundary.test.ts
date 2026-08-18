@@ -14,6 +14,19 @@ const executorSource = fs.readFileSync(
   path.join(repositoryRoot, "src", "dispatcher", "codex-executor.ts"),
   "utf8",
 );
+const dispatcherIndexSource = fs.readFileSync(
+  path.join(repositoryRoot, "src", "dispatcher", "index.ts"),
+  "utf8",
+);
+const pinnedGitSource = fs.readFileSync(
+  path.join(
+    repositoryRoot,
+    "src",
+    "evidence",
+    "pinned-git-evidence-provider.ts",
+  ),
+  "utf8",
+);
 
 describe("read-only dispatcher security boundary", () => {
   it("pins the Codex CLI to read-only, non-interactive, ephemeral execution", () => {
@@ -62,5 +75,34 @@ describe("read-only dispatcher security boundary", () => {
     expect(executorSource).not.toContain("codexArguments.push(input.prompt)");
     expect(executorSource).not.toContain("exec(");
     expect(executorSource).not.toContain("execFile(");
+  });
+
+  it("removes local read-capable tools from evidence-only turns", () => {
+    expect(executorSource).toContain('"evidence_only"');
+    expect(executorSource).toContain('"shell_tool"');
+    expect(executorSource).toContain('"unified_exec"');
+    expect(executorSource).toContain('"view_image"');
+    expect(executorSource).toContain('"--skip-git-repo-check"');
+  });
+
+  it("selects exactly one foreground dispatcher mode", () => {
+    expect(dispatcherIndexSource).toContain(
+      "AutonomousConsultationCoordinator",
+    );
+    expect(dispatcherIndexSource).toContain(
+      "PinnedGitEvidenceProvider",
+    );
+    expect(dispatcherIndexSource).toContain(
+      'config.mode === "consultation"',
+    );
+  });
+
+  it("bounds every synchronous Git evidence command", () => {
+    expect(pinnedGitSource).toContain(
+      "GIT_COMMAND_TIMEOUT_MS",
+    );
+    expect(pinnedGitSource).toContain(
+      "timeout: GIT_COMMAND_TIMEOUT_MS",
+    );
   });
 });

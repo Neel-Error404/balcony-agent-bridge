@@ -103,6 +103,7 @@ describe("bridge envelope", () => {
           executor: "codex_cli",
           access: "read_only",
           timeout_seconds: 120,
+          evidence_mode: "pinned_git",
         },
       },
     });
@@ -111,6 +112,7 @@ describe("bridge envelope", () => {
       executor: "codex_cli",
       access: "read_only",
       timeout_seconds: 120,
+      evidence_mode: "pinned_git",
     });
 
     expect(() =>

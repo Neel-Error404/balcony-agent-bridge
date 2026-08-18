@@ -27,6 +27,13 @@ SQLite database, claims only explicitly routed read-only Codex tasks, and never
 connects to Azure. Codex execution does not occur inside the broker receive
 handler, so a long inspection cannot hold an Azure message lock.
 
+The consultation candidate adds a durable autonomous consultation
+coordinator beside that dispatcher. It parks child information requests in
+version-fenced SQLite runs, resumes one transition at a time, and may create
+one correlated nested peer request within bounded round, depth, timeout,
+duplicate, and cycle controls. The foreground entrypoint selects either the
+legacy dispatcher or consultation coordinator, never both in one process.
+
 The dispatcher uses a machine-local project registry. Remote messages select a
 stable project key and never provide a filesystem path or executable command.
 The child process receives a minimal environment and fixed Codex arguments:
@@ -86,6 +93,20 @@ Letta integration, remote repository reader, or file-transfer protocol. Such a
 connector should produce bounded evidence for an executor; it should not change
 message delivery semantics or place paths, credentials, or complete memory
 stores in broker messages.
+
+The candidate evidence boundary has two local adapters. The filesystem adapter
+reads explicit allowlisted text paths with containment and reparse controls.
+The Git adapter requires a caller-supplied full revision equal to repository
+`HEAD`, verifies tracked blobs, and reads committed bytes from the Git object
+database. Evidence bundles include content SHA-256 values and source-specific
+provenance without exposing the machine-local repository root.
+
+Evidence-only child turns run from a neutral directory and receive the bundle
+through standard input. User configuration is ignored, the read-only sandbox
+prevents mutation, and the native shell, unified executor, and image-file
+reader features are disabled. This is an executable tool-surface boundary, not
+a claim that the native process cannot read its own authentication home or
+required operating-system files.
 
 The current orchestration is intentionally small: one configured peer,
 serialized bounded turns inside one project, caller polling, and read-only

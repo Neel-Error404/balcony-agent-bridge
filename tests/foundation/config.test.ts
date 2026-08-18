@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -106,5 +108,48 @@ describe("bridge configuration", () => {
         BALCONY_SYSTEM_ID: "SYS-A",
       }),
     ).toThrow(/BALCONY_DISPATCHER_PROJECTS_PATH/);
+  });
+
+  it("loads explicit consultation-mode executable and containment settings", () => {
+    const config = loadReadOnlyDispatcherConfig({
+      BALCONY_SYSTEM_ID: "SYS-B",
+      BALCONY_BRIDGE_DB_PATH: "E:\\bridge.sqlite3",
+      BALCONY_DISPATCHER_PROJECTS_PATH:
+        "E:\\local\\dispatcher-projects.json",
+      BALCONY_CODEX_EXECUTABLE: "E:\\tools\\codex.exe",
+      BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+      BALCONY_DISPATCHER_CODEX_HOME: "E:\\local\\codex-home",
+      BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
+      BALCONY_DISPATCHER_MODE: "consultation",
+      BALCONY_CONSULTATION_WORKING_DIRECTORY:
+        "E:\\local\\evidence-only",
+      BALCONY_GIT_EXECUTABLE: "C:\\tools\\git.exe",
+      BALCONY_GIT_EXECUTABLE_SHA256: "b".repeat(64),
+    });
+
+    expect(config).toMatchObject({
+      mode: "consultation",
+      consultationWorkingDirectory:
+        path.resolve("E:\\local\\evidence-only"),
+      gitExecutable: path.resolve("C:\\tools\\git.exe"),
+      gitExecutableSha256: "b".repeat(64),
+    });
+  });
+
+  it("fails closed when consultation mode lacks its pinned Git controls", () => {
+    expect(() =>
+      loadReadOnlyDispatcherConfig({
+        BALCONY_SYSTEM_ID: "SYS-B",
+        BALCONY_DISPATCHER_PROJECTS_PATH:
+          "E:\\local\\dispatcher-projects.json",
+        BALCONY_CODEX_EXECUTABLE: "E:\\tools\\codex.exe",
+        BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+        BALCONY_DISPATCHER_CODEX_HOME: "E:\\local\\codex-home",
+        BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
+        BALCONY_DISPATCHER_MODE: "consultation",
+      }),
+    ).toThrow(
+      /BALCONY_CONSULTATION_WORKING_DIRECTORY|BALCONY_GIT_EXECUTABLE/,
+    );
   });
 });

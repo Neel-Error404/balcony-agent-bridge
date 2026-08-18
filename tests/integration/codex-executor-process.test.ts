@@ -101,6 +101,52 @@ describe("LocalCodexExecutor process boundary", () => {
     expect(output.azureSecret).toBeFalsy();
   });
 
+  it("disables local file-reading tools for evidence-only execution", async () => {
+    const executable = writePowerShellFixture(
+      temporaryDirectory,
+      "evidence-only.ps1",
+      [
+        "$prompt = $input | Out-String",
+        "@{ arguments = @($args); prompt = $prompt } | ConvertTo-Json -Compress",
+      ],
+    );
+    const executor = new LocalCodexExecutor(
+      executable,
+      codexHome,
+      fileHash(executable),
+      trustedPath(),
+      process.env,
+    );
+
+    const result = await executor.execute({
+      projectPath: projectDirectory,
+      executionBoundary: "evidence_only",
+      prompt: "Use only the supplied evidence.",
+      timeoutSeconds: 30,
+      maxOutputBytes: 20_000,
+    });
+    const output = JSON.parse(result.output) as {
+      arguments: string[];
+      prompt: string;
+    };
+
+    expect(output.arguments).toEqual(
+      expect.arrayContaining([
+        "--skip-git-repo-check",
+        "--disable",
+        "shell_tool",
+        "--disable",
+        "unified_exec",
+        "--disable",
+        "view_image",
+      ]),
+    );
+    expect(output.arguments).not.toContain("--add-dir");
+    expect(output.prompt.trimEnd()).toBe(
+      "Use only the supplied evidence.",
+    );
+  });
+
   it("terminates a worker that exceeds its timeout", async () => {
     const executable = writePowerShellFixture(
       temporaryDirectory,

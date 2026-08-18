@@ -114,6 +114,81 @@ describe("ProjectRegistry", () => {
     );
   });
 
+  it("loads schema 1.2 projects with one pinned Git revision", () => {
+    const root = temporaryDirectory();
+    const project = path.join(root, "project");
+    fs.mkdirSync(project);
+    const revision = "a".repeat(40);
+    const registryPath = writeRegistry(root, {
+      schema_version: "1.2",
+      projects: [
+        {
+          key: "bridge",
+          path: project,
+          peer_readable: true,
+          evidence: {
+            provider: "pinned_git",
+            revision,
+          },
+        },
+      ],
+    });
+
+    expect(ProjectRegistry.load(registryPath).get("bridge")).toEqual({
+      key: "bridge",
+      path: fs.realpathSync.native(project),
+      evidence: {
+        provider: "pinned_git",
+        revision,
+      },
+    });
+  });
+
+  it("requires pinned Git evidence metadata in schema 1.2", () => {
+    const root = temporaryDirectory();
+    const project = path.join(root, "project");
+    fs.mkdirSync(project);
+    const registryPath = writeRegistry(root, {
+      schema_version: "1.2",
+      projects: [
+        {
+          key: "bridge",
+          path: project,
+          peer_readable: true,
+        },
+      ],
+    });
+
+    expect(() => ProjectRegistry.load(registryPath)).toThrow(
+      /evidence/,
+    );
+  });
+
+  it("accepts a PowerShell UTF-8 BOM in the machine-local registry", () => {
+    const root = temporaryDirectory();
+    const project = path.join(root, "project");
+    fs.mkdirSync(project);
+    const registryPath = path.join(root, "projects.json");
+    fs.writeFileSync(
+      registryPath,
+      `\uFEFF${JSON.stringify({
+        schema_version: "1.0",
+        projects: [
+          {
+            key: "bridge",
+            path: project,
+            peer_readable: true,
+          },
+        ],
+      })}`,
+      "utf8",
+    );
+
+    expect(ProjectRegistry.load(registryPath).get("bridge")).toMatchObject({
+      key: "bridge",
+    });
+  });
+
   function temporaryDirectory(): string {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "balcony-project-registry-"),

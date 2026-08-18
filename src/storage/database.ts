@@ -11,6 +11,11 @@ import {
   type SystemId,
 } from "../contracts/envelope.js";
 import {
+  ConsultationRunSchema,
+  type ConsultationRun,
+  type ConsultationRunState,
+} from "../contracts/consultation.js";
+import {
   DispatchResultUnavailableError,
   IdempotencyConflictError,
   StateTransitionError,
@@ -96,11 +101,17 @@ export interface ConversationListItem {
   state: InboxState | OutboxState;
 }
 
+export interface EnsureConsultationRunResult {
+  run: ConsultationRun;
+  created: boolean;
+}
+
 export type AcknowledgeOutcome = "processed" | "rejected" | "retry";
 
 export interface BridgeStatus {
   outbox: Record<OutboxState, number>;
   inbox: Record<InboxState, number>;
+  consultation: Record<ConsultationRunState, number>;
   oldestPendingCreatedAtUtc?: string;
   bridgeHeartbeatAtUtc?: string;
   bridgeRuntimeStatus?: string;
@@ -108,6 +119,9 @@ export interface BridgeStatus {
   dispatcherHeartbeatAtUtc?: string;
   dispatcherRuntimeStatus?: string;
   lastDispatcherErrorCode?: string;
+  consultationCoordinatorHeartbeatAtUtc?: string;
+  consultationCoordinatorRuntimeStatus?: string;
+  lastConsultationCoordinatorErrorCode?: string;
 }
 
 export class BridgeDatabase {
@@ -267,6 +281,109 @@ export class BridgeDatabase {
 
   public close(): void {
     this.database.close();
+  }
+
+  public getConsultationRun(
+    requestMessageId: string,
+  ): ConsultationRun | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT run_json
+         FROM consultation_runs
+         WHERE request_message_id = ?`,
+      )
+      .get(requestMessageId) as { run_json: string } | undefined;
+    return row
+      ? ConsultationRunSchema.parse(JSON.parse(row.run_json))
+      : undefined;
+  }
+
+  public ensureConsultationRun(
+    value: ConsultationRun,
+  ): EnsureConsultationRunResult {
+    const run = ConsultationRunSchema.parse(value);
+    if (run.version !== 0) {
+      throw new StateTransitionError(
+        "A new consultation run must begin at version 0",
+      );
+    }
+    const insert = this.database
+      .prepare(
+        `INSERT OR IGNORE INTO consultation_runs (
+          request_message_id,
+          state,
+          version,
+          run_json,
+          created_at_utc,
+          updated_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        run.request_message_id,
+        run.state,
+        run.version,
+        JSON.stringify(run),
+        run.created_at_utc,
+        run.updated_at_utc,
+      );
+    if (insert.changes === 1) {
+      return { run, created: true };
+    }
+
+    const existing = this.getConsultationRun(run.request_message_id);
+    if (!existing) {
+      throw new StateTransitionError(
+        `Consultation run '${run.request_message_id}' collided with an unreadable row`,
+      );
+    }
+    if (!sameConsultationIdentity(existing, run)) {
+      throw new StateTransitionError(
+        `Consultation run '${run.request_message_id}' already exists with different identity`,
+      );
+    }
+    return { run: existing, created: false };
+  }
+
+  public saveConsultationRun(
+    value: ConsultationRun,
+    expectedVersion: number,
+    now = new Date(),
+  ): ConsultationRun {
+    const candidate = ConsultationRunSchema.parse(value);
+    if (candidate.version !== expectedVersion) {
+      throw new StateTransitionError(
+        "Consultation run version does not match the expected version",
+      );
+    }
+    const updated = ConsultationRunSchema.parse({
+      ...candidate,
+      version: expectedVersion + 1,
+      updated_at_utc: now.toISOString(),
+    });
+    const result = this.database
+      .prepare(
+        `UPDATE consultation_runs
+         SET state = ?,
+             version = ?,
+             run_json = ?,
+             updated_at_utc = ?
+         WHERE request_message_id = ?
+           AND version = ?`,
+      )
+      .run(
+        updated.state,
+        updated.version,
+        JSON.stringify(updated),
+        updated.updated_at_utc,
+        updated.request_message_id,
+        expectedVersion,
+      );
+    if (result.changes !== 1) {
+      throw new StateTransitionError(
+        `Consultation run '${updated.request_message_id}' has a stale version`,
+      );
+    }
+    return updated;
   }
 
   public enqueueEnvelope(envelopeValue: unknown): EnqueueResult {
@@ -834,7 +951,8 @@ export class BridgeDatabase {
       leaseSeconds,
       `AND kind = 'task_request'
        AND json_extract(envelope_json, '$.payload.dispatch.executor') = 'codex_cli'
-       AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'`,
+       AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'
+       AND json_extract(envelope_json, '$.payload.dispatch.evidence_mode') IS NULL`,
       [],
       now,
     );
@@ -847,6 +965,7 @@ export class BridgeDatabase {
     additionalFilter: string,
     additionalParameters: readonly string[],
     now: Date,
+    includeExpired = false,
   ): ClaimedInboxMessage[] {
     assertNonEmpty(consumerId, "consumerId");
     assertPositiveInteger(limit, "limit");
@@ -867,20 +986,23 @@ export class BridgeDatabase {
         .run(nowUtc);
 
       const parameters: Array<string | number> = [
-        nowUtc,
+        ...(includeExpired ? [] : [nowUtc]),
         ...additionalParameters,
         limit,
       ];
+      const expirationFilter = includeExpired
+        ? ""
+        : `AND (
+               json_extract(envelope_json, '$.expires_at_utc') IS NULL
+               OR json_extract(envelope_json, '$.expires_at_utc') > ?
+             )`;
       const rows = this.database
         .prepare(
           `SELECT message_id, envelope_json, payload_sha256, state,
                   claim_owner, claim_token_hash, claim_until_utc
            FROM inbox
            WHERE state = 'available'
-             AND (
-               json_extract(envelope_json, '$.expires_at_utc') IS NULL
-               OR json_extract(envelope_json, '$.expires_at_utc') > ?
-             )
+             ${expirationFilter}
              ${additionalFilter}
            ORDER BY first_received_at_utc, message_id
            LIMIT ?`,
@@ -1050,8 +1172,26 @@ export class BridgeDatabase {
     );
   }
 
+  public recordConsultationCoordinatorHeartbeat(
+    instanceId: string,
+    status: string,
+    lastErrorCode?: string,
+    now = new Date(),
+  ): void {
+    this.recordRuntimeHeartbeat(
+      "consultation_coordinator",
+      instanceId,
+      status,
+      lastErrorCode,
+      now,
+    );
+  }
+
   private recordRuntimeHeartbeat(
-    component: "bridge" | "dispatcher",
+    component:
+      | "bridge"
+      | "dispatcher"
+      | "consultation_coordinator",
     instanceId: string,
     status: string,
     lastErrorCode: string | undefined,
@@ -1085,6 +1225,17 @@ export class BridgeDatabase {
       "inbox",
       ["available", "claimed", "processed", "rejected", "quarantined"],
     );
+    const consultation = countByState<ConsultationRunState>(
+      this.database,
+      "consultation_runs",
+      [
+        "pending_child",
+        "needs_information",
+        "waiting_peer",
+        "completed",
+        "failed",
+      ],
+    );
     const oldest = this.database
       .prepare(
         `SELECT MIN(created_at_utc) AS created_at_utc
@@ -1113,12 +1264,26 @@ export class BridgeDatabase {
           status: string;
           heartbeat_at_utc: string;
           last_error: string | null;
+      }
+      | undefined;
+    const consultationRuntime = this.database
+      .prepare(
+        `SELECT status, heartbeat_at_utc, last_error
+         FROM runtime_state
+         WHERE component = 'consultation_coordinator'`,
+      )
+      .get() as
+      | {
+          status: string;
+          heartbeat_at_utc: string;
+          last_error: string | null;
         }
       | undefined;
 
     return {
       outbox,
       inbox,
+      consultation,
       ...(oldest.created_at_utc
         ? { oldestPendingCreatedAtUtc: oldest.created_at_utc }
         : {}),
@@ -1140,6 +1305,20 @@ export class BridgeDatabase {
               ? {
                   lastDispatcherErrorCode:
                     dispatcherRuntime.last_error,
+                }
+              : {}),
+          }
+        : {}),
+      ...(consultationRuntime
+        ? {
+            consultationCoordinatorHeartbeatAtUtc:
+              consultationRuntime.heartbeat_at_utc,
+            consultationCoordinatorRuntimeStatus:
+              consultationRuntime.status,
+            ...(consultationRuntime.last_error
+              ? {
+                  lastConsultationCoordinatorErrorCode:
+                    consultationRuntime.last_error,
                 }
               : {}),
           }
@@ -1270,6 +1449,26 @@ export class BridgeDatabase {
         last_error TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS consultation_runs (
+        request_message_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (
+          state IN (
+            'pending_child',
+            'needs_information',
+            'waiting_peer',
+            'completed',
+            'failed'
+          )
+        ),
+        version INTEGER NOT NULL,
+        run_json TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_consultation_runs_state
+        ON consultation_runs (state, updated_at_utc);
+
       INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc)
       VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     `);
@@ -1315,6 +1514,43 @@ export class BridgeDatabase {
         .run();
     });
     coordinationMigration.immediate();
+
+    this.database
+      .prepare(
+        `INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc)
+         VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      )
+      .run();
+  }
+
+  public claimAutonomousConsultationInbox(
+    consumerId: string,
+    limit: number,
+    leaseSeconds: number,
+    now = new Date(),
+  ): ClaimedInboxMessage[] {
+    return this.claimInboxWhere(
+      consumerId,
+      limit,
+      leaseSeconds,
+      `AND kind = 'task_request'
+       AND stream_id = 'agent-coordination'
+       AND json_extract(envelope_json, '$.payload.coordination_request.protocol_version') = '1.0'
+       AND json_extract(envelope_json, '$.payload.dispatch.executor') = 'codex_cli'
+       AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'
+       AND json_extract(envelope_json, '$.payload.dispatch.evidence_mode') = 'pinned_git'
+       AND COALESCE(
+         (
+           SELECT json_extract(run_json, '$.next_attempt_at_utc')
+           FROM consultation_runs
+           WHERE request_message_id = inbox.message_id
+         ),
+         ''
+       ) <= ?`,
+      [now.toISOString()],
+      now,
+      true,
+    );
   }
 
   private ensureColumn(
@@ -1332,6 +1568,19 @@ export class BridgeDatabase {
       `ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`,
     );
   }
+}
+
+function sameConsultationIdentity(
+  left: ConsultationRun,
+  right: ConsultationRun,
+): boolean {
+  return (
+    left.request_message_id === right.request_message_id &&
+    left.conversation_id === right.conversation_id &&
+    left.root_request_id === right.root_request_id &&
+    left.project === right.project &&
+    left.depth === right.depth
+  );
 }
 
 function sameIdempotentOperation(
@@ -1374,7 +1623,7 @@ function truncate(value: string, maximumLength: number): string {
 
 function countByState<T extends string>(
   database: Database.Database,
-  table: "outbox" | "inbox",
+  table: "outbox" | "inbox" | "consultation_runs",
   states: readonly T[],
 ): Record<T, number> {
   const counts = Object.fromEntries(states.map((state) => [state, 0])) as Record<

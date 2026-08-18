@@ -26,6 +26,7 @@ export interface SendMessageInput {
   causationId?: string;
   sequenceNumber?: number;
   expiresAtUtc?: string;
+  now?: Date;
 }
 
 export interface ClaimInboxInput {
@@ -44,6 +45,7 @@ export interface AskAgentInput {
   timeoutSeconds: number;
   conversationId?: string;
   expiresAtUtc?: string;
+  evidenceMode?: "pinned_git";
 }
 
 export interface ContinueAgentInput {
@@ -84,6 +86,7 @@ export class AgentBridgeService {
         ? { sequenceNumber: input.sequenceNumber }
         : {}),
       expiresAtUtc,
+      ...(input.now ? { now: input.now } : {}),
     });
     const result = this.database.enqueueEnvelope(envelope);
     const authoritative = this.database.getOutboxMessage(result.messageId);
@@ -124,6 +127,9 @@ export class AgentBridgeService {
           executor: "codex_cli",
           access: "read_only",
           timeout_seconds: input.timeoutSeconds,
+          ...(input.evidenceMode
+            ? { evidence_mode: input.evidenceMode }
+            : {}),
         },
         coordination_request: {
           protocol_version: COORDINATION_PROTOCOL_VERSION,
@@ -233,6 +239,14 @@ export class AgentBridgeService {
           executor: "codex_cli",
           access: "read_only",
           timeout_seconds: input.timeoutSeconds,
+          ...(priorRequest.envelope.payload.dispatch
+            ?.evidence_mode
+            ? {
+                evidence_mode:
+                  priorRequest.envelope.payload.dispatch
+                    .evidence_mode,
+              }
+            : {}),
         },
         coordination_request: {
           protocol_version: COORDINATION_PROTOCOL_VERSION,
@@ -463,12 +477,14 @@ export class AgentBridgeService {
     kind: MessageKind;
     payload: MessagePayload;
     reason?: string;
+    now?: Date;
   }): Record<string, unknown> {
     const envelope = this.createReplyEnvelope(
       input.originalMessageId,
       input.idempotencyKey,
       input.kind,
       input.payload,
+      input.now,
     );
     const result = this.database.settleInboxWithReply({
       messageId: input.originalMessageId,
@@ -477,6 +493,7 @@ export class AgentBridgeService {
       outcome: input.outcome,
       replyEnvelope: envelope,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.now ? { now: input.now } : {}),
     });
     return {
       message_id: input.originalMessageId,
@@ -492,6 +509,7 @@ export class AgentBridgeService {
     idempotencyKey: string,
     kind: MessageKind,
     payload: MessagePayload,
+    now = new Date(),
   ) {
     const original = this.database.getInboxMessage(originalMessageId);
     if (!original) {
@@ -519,8 +537,9 @@ export class AgentBridgeService {
         ? { correlationId: original.envelope.correlation_id }
         : {}),
       expiresAtUtc: new Date(
-        Date.now() + 7 * 24 * 60 * 60 * 1000,
+        now.getTime() + 7 * 24 * 60 * 60 * 1000,
       ).toISOString(),
+      now,
     });
   }
 

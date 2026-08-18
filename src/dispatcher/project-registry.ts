@@ -15,28 +15,54 @@ const ProjectKeySchema = z
     "must contain only letters, numbers, dots, underscores, and hyphens",
   );
 
-const ProjectRegistrySchema = z
+const ProjectEntrySchema = z
   .object({
-    schema_version: z.literal("1.0"),
-    projects: z
-      .array(
-        z
-          .object({
-            key: ProjectKeySchema,
-            path: z.string().trim().min(1),
-            enabled: z.boolean().default(true),
-            peer_readable: z.literal(true),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(200),
+    key: ProjectKeySchema,
+    path: z.string().trim().min(1),
+    enabled: z.boolean().default(true),
+    peer_readable: z.literal(true),
   })
   .strict();
+
+const PinnedProjectEntrySchema = ProjectEntrySchema.extend({
+  evidence: z
+    .object({
+      provider: z.literal("pinned_git"),
+      revision: z
+        .string()
+        .regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u),
+    })
+    .strict(),
+}).strict();
+
+const ProjectRegistrySchema = z.discriminatedUnion(
+  "schema_version",
+  [
+    z
+      .object({
+        schema_version: z.literal("1.0"),
+        projects: z.array(ProjectEntrySchema).min(1).max(200),
+      })
+      .strict(),
+    z
+      .object({
+        schema_version: z.literal("1.2"),
+        projects: z
+          .array(PinnedProjectEntrySchema)
+          .min(1)
+          .max(200),
+      })
+      .strict(),
+  ],
+);
 
 export interface RegisteredProject {
   key: string;
   path: string;
+  evidence?: {
+    provider: "pinned_git";
+    revision: string;
+  };
 }
 
 export class ProjectRegistry {
@@ -49,7 +75,12 @@ export class ProjectRegistry {
   public static load(registryPath: string): ProjectRegistry {
     let raw: unknown;
     try {
-      raw = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+      const content = fs.readFileSync(registryPath, "utf8");
+      raw = JSON.parse(
+        content.charCodeAt(0) === 0xfeff
+          ? content.slice(1)
+          : content,
+      );
     } catch (error) {
       throw new DispatchConfigurationError(
         "The dispatcher project registry could not be read as JSON.",
@@ -111,6 +142,9 @@ export class ProjectRegistry {
       projects.set(normalizedKey, {
         key: project.key,
         path: resolvedPath,
+        ...("evidence" in project
+          ? { evidence: project.evidence }
+          : {}),
       });
     }
 

@@ -79,8 +79,40 @@ const DispatcherEnvironmentSchema = z
       .min(1024)
       .max(60_000)
       .default(48_000),
+    BALCONY_DISPATCHER_MODE: z
+      .enum(["legacy", "consultation"])
+      .default("legacy"),
+    BALCONY_CONSULTATION_WORKING_DIRECTORY: z
+      .string()
+      .trim()
+      .min(1)
+      .optional(),
+    BALCONY_GIT_EXECUTABLE: z.string().trim().min(1).optional(),
+    BALCONY_GIT_EXECUTABLE_SHA256: z
+      .string()
+      .trim()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, context) => {
+    if (value.BALCONY_DISPATCHER_MODE !== "consultation") {
+      return;
+    }
+    for (const key of [
+      "BALCONY_CONSULTATION_WORKING_DIRECTORY",
+      "BALCONY_GIT_EXECUTABLE",
+      "BALCONY_GIT_EXECUTABLE_SHA256",
+    ] as const) {
+      if (!value[key]) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "is required in consultation mode",
+        });
+      }
+    }
+  });
 
 export interface ReadOnlyDispatcherConfig {
   systemId: SystemId;
@@ -94,6 +126,10 @@ export interface ReadOnlyDispatcherConfig {
   pollIntervalMs: number;
   defaultTimeoutSeconds: number;
   maxOutputBytes: number;
+  mode?: "legacy" | "consultation";
+  consultationWorkingDirectory?: string;
+  gitExecutable?: string;
+  gitExecutableSha256?: string;
 }
 
 export function loadConfig(
@@ -193,6 +229,27 @@ export function loadReadOnlyDispatcherConfig(
     defaultTimeoutSeconds:
       result.data.BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS,
     maxOutputBytes: result.data.BALCONY_DISPATCHER_MAX_OUTPUT_BYTES,
+    mode: result.data.BALCONY_DISPATCHER_MODE,
+    ...(result.data.BALCONY_CONSULTATION_WORKING_DIRECTORY
+      ? {
+          consultationWorkingDirectory: path.resolve(
+            result.data.BALCONY_CONSULTATION_WORKING_DIRECTORY,
+          ),
+        }
+      : {}),
+    ...(result.data.BALCONY_GIT_EXECUTABLE
+      ? {
+          gitExecutable: path.resolve(
+            result.data.BALCONY_GIT_EXECUTABLE,
+          ),
+        }
+      : {}),
+    ...(result.data.BALCONY_GIT_EXECUTABLE_SHA256
+      ? {
+          gitExecutableSha256:
+            result.data.BALCONY_GIT_EXECUTABLE_SHA256.toLowerCase(),
+        }
+      : {}),
   };
 }
 

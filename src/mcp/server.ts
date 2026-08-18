@@ -87,6 +87,7 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
         request: z.string().trim().min(1).max(12_000),
         intent: CoordinationIntentSchema.default("question"),
         timeout_seconds: z.number().int().min(30).max(600).default(300),
+        evidence_mode: z.literal("pinned_git").optional(),
         conversation_id: z.string().uuid().optional(),
         expires_at_utc: z.string().datetime({ offset: true }).optional(),
       },
@@ -106,6 +107,9 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
           request: input.request,
           intent: input.intent,
           timeoutSeconds: input.timeout_seconds,
+          ...(input.evidence_mode
+            ? { evidenceMode: input.evidence_mode }
+            : {}),
           ...(input.conversation_id
             ? { conversationId: input.conversation_id }
             : {}),

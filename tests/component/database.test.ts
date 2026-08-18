@@ -187,6 +187,38 @@ describe("BridgeDatabase", () => {
     expect(claimed).toHaveLength(1);
     expect(claimed[0]!.envelope.kind).toBe("status");
   });
+
+  it("routes legacy and pinned consultations to different claimers", () => {
+    const legacy = coordinationEnvelope(
+      "legacy-routing",
+      undefined,
+    );
+    const consultation = coordinationEnvelope(
+      "consultation-routing",
+      "pinned_git",
+    );
+    database.persistIncoming(legacy, 1);
+    database.persistIncoming(consultation, 1);
+
+    const legacyClaims = database.claimReadOnlyDispatchInbox(
+      "legacy-dispatcher",
+      10,
+      60,
+    );
+    const consultationClaims =
+      database.claimAutonomousConsultationInbox(
+        "consultation-dispatcher",
+        10,
+        720,
+      );
+
+    expect(legacyClaims.map((item) => item.envelope.message_id)).toEqual([
+      legacy.message_id,
+    ]);
+    expect(
+      consultationClaims.map((item) => item.envelope.message_id),
+    ).toEqual([consultation.message_id]);
+  });
 });
 
 function envelope(idempotencyKey: string, body: string) {
@@ -202,5 +234,36 @@ function envelope(idempotencyKey: string, body: string) {
       evidence: [],
     },
     now: new Date("2026-08-13T12:00:00.000Z"),
+  });
+}
+
+function coordinationEnvelope(
+  idempotencyKey: string,
+  evidenceMode: "pinned_git" | undefined,
+) {
+  return createEnvelope({
+    idempotencyKey,
+    originSystem: "SYS-A",
+    targetSystem: "SYS-B",
+    kind: "task_request",
+    streamId: "agent-coordination",
+    payload: {
+      subject: "Coordination routing",
+      body: "Route this request.",
+      project: "bridge",
+      evidence: [],
+      dispatch: {
+        executor: "codex_cli",
+        access: "read_only",
+        ...(evidenceMode
+          ? { evidence_mode: evidenceMode }
+          : {}),
+      },
+      coordination_request: {
+        protocol_version: "1.0",
+        intent: "inspect",
+        access_mode: "read_only",
+      },
+    },
   });
 }

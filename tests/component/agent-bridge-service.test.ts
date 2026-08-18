@@ -81,6 +81,7 @@ describe("AgentBridgeService", () => {
       request: "Report the repository state without modifying it.",
       intent: "inspect",
       timeoutSeconds: 120,
+      evidenceMode: "pinned_git",
     }) as {
       task_id: string;
       conversation_id: string;
@@ -93,6 +94,7 @@ describe("AgentBridgeService", () => {
       request: "Report the repository state without modifying it.",
       intent: "inspect",
       timeoutSeconds: 120,
+      evidenceMode: "pinned_git",
     }) as {
       task_id: string;
       conversation_id: string;
@@ -104,6 +106,12 @@ describe("AgentBridgeService", () => {
       task_id: first.task_id,
       conversation_id: first.conversation_id,
       duplicate: true,
+    });
+    expect(
+      database.getOutboxMessage(first.task_id)?.envelope.payload
+        .dispatch,
+    ).toMatchObject({
+      evidence_mode: "pinned_git",
     });
 
     const reply = createEnvelope({
