@@ -104,5 +104,7 @@ describe("read-only dispatcher security boundary", () => {
     expect(pinnedGitSource).toContain(
       "timeout: GIT_COMMAND_TIMEOUT_MS",
     );
+    expect(pinnedGitSource).not.toContain('return "git"');
+    expect(pinnedGitSource).toContain("gitExecutable: z.string().trim().min(1)");
   });
 });

@@ -21,6 +21,8 @@ Before collecting Git evidence:
 4. Keep the repository clean unless the owner explicitly approves a
    dirty-worktree diagnostic.
 5. Request only canonical relative paths to tracked text files.
+6. Configure an absolute Git executable and its approved SHA-256. The
+   provider has no PATH-based Git fallback.
 
 `PinnedGitEvidenceProvider` reads each committed blob from the Git object
 database. It does not read mutable working-tree content. Each item records the
@@ -41,13 +43,27 @@ consultation.needs_information
 consultation.waiting_peer
 consultation.completed
 consultation.failed
+consultationEvidence.runsWithEvidence
+consultationEvidence.items
+consultationEvidence.totalBytes
 consultationCoordinatorHeartbeatAtUtc
+consultationCoordinatorHeartbeatAgeSeconds
 consultationCoordinatorRuntimeStatus
+consultationCoordinatorReportedStatus
 lastConsultationCoordinatorErrorCode
 ```
 
-The heartbeat proves only that the coordinator recorded local liveness. It
-does not prove peer delivery, child completion, result return, or deployment.
+Runtime status is derived from heartbeat age. Bridge heartbeats become stale
+after 30 minutes; dispatcher and consultation-coordinator heartbeats become
+stale after 10 minutes. `*ReportedStatus` retains the last process report,
+while `*RuntimeStatus` is the effective current classification. The heartbeat
+still does not prove peer delivery, child completion, result return, or
+deployment.
+
+On completion, only evidence paths cited by the evidence-only child are
+promoted into the result envelope. Pinned files return `repository_path` and
+`git_commit` references; peer evidence returns the exact `bridge_message`
+identifier. Evidence content remains local and is never copied into status.
 
 Interpret nonterminal states as follows:
 

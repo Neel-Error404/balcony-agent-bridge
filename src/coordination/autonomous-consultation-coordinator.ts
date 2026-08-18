@@ -292,6 +292,7 @@ export class AutonomousConsultationCoordinator {
           state: "completed",
           round_count: nextRound,
           final_answer: child.answer,
+          final_evidence_paths: child.evidence_paths,
         },
         run.version,
         completedAt,
@@ -523,7 +524,7 @@ export class AutonomousConsultationCoordinator {
           200,
         ),
         body: run.final_answer,
-        evidence: [],
+        evidence: buildEvidenceReferences(run),
         coordination_result: {
           protocol_version: "1.0",
           request_message_id: run.request_message_id,
@@ -697,6 +698,54 @@ function peerEvidenceItem(envelope: BridgeEnvelope): EvidenceItem {
     byte_length: bytes.byteLength,
     modified_at_utc: envelope.created_at_utc,
   };
+}
+
+function buildEvidenceReferences(
+  run: ConsultationRun,
+): Array<{
+  kind:
+    | "repository_path"
+    | "git_commit"
+    | "obsidian_note"
+    | "test_run"
+    | "bridge_message";
+  value: string;
+}> {
+  const selected = new Set(
+    run.final_evidence_paths.map((value) =>
+      value.replaceAll("\\", "/").toLowerCase(),
+    ),
+  );
+  const references = new Map<
+    string,
+    {
+      kind:
+        | "repository_path"
+        | "git_commit"
+        | "obsidian_note"
+        | "test_run"
+        | "bridge_message";
+      value: string;
+    }
+  >();
+  for (const item of run.evidence.items) {
+    if (!selected.has(item.path.replaceAll("\\", "/").toLowerCase())) {
+      continue;
+    }
+    const reference =
+      item.source === "peer_result"
+        ? {
+            kind: "bridge_message" as const,
+            value: item.source_message_id!,
+          }
+        : { kind: "repository_path" as const, value: item.path };
+    references.set(`${reference.kind}:${reference.value}`, reference);
+    if (item.git_commit) {
+      const commit = { kind: "git_commit" as const, value: item.git_commit };
+      references.set(`${commit.kind}:${commit.value}`, commit);
+    }
+  }
+  return [...references.values()];
 }
 
 function withoutTransientRequests(

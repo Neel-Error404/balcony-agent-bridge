@@ -111,6 +111,7 @@ describe("AutonomousConsultationCoordinator", () => {
       state: "completed",
       round_count: 2,
       final_answer: "The supplied README identifies the bridge.",
+      final_evidence_paths: ["README.md"],
     });
     expect(database.getInboxMessage(request.message_id)?.state).toBe(
       "processed",
@@ -129,6 +130,12 @@ describe("AutonomousConsultationCoordinator", () => {
     );
     expect(reply?.envelope.payload).toMatchObject({
       body: "The supplied README identifies the bridge.",
+      evidence: [
+        {
+          kind: "repository_path",
+          value: "README.md",
+        },
+      ],
       coordination_result: {
         request_message_id: request.message_id,
         outcome: "completed",
@@ -265,6 +272,11 @@ describe("AutonomousConsultationCoordinator", () => {
         requested_evidence: ["README.md"],
         evidence_paths: [],
       }),
+      childResult({
+        outcome: "completed",
+        answer: "Pinned bridge evidence is verified.",
+        evidence_paths: ["README.md"],
+      }),
     );
     const pinnedCoordinator = createCoordinator(
       new PinnedEvidenceProvider(),
@@ -272,9 +284,11 @@ describe("AutonomousConsultationCoordinator", () => {
 
     await pinnedCoordinator.runOnce(now(1));
     await pinnedCoordinator.runOnce(now(2));
+    await pinnedCoordinator.runOnce(now(3));
 
     expect(database.getConsultationRun(request.message_id)).toMatchObject({
-      state: "pending_child",
+      state: "completed",
+      final_evidence_paths: ["README.md"],
       evidence: {
         git_snapshot: {
           revision: "a".repeat(40),
@@ -288,6 +302,14 @@ describe("AutonomousConsultationCoordinator", () => {
         ],
       },
     });
+    const reply = database.getOutboxByIdempotency(
+      "SYS-A",
+      `consultation-result:${request.message_id}`,
+    );
+    expect(reply?.envelope.payload.evidence).toEqual([
+      { kind: "repository_path", value: "README.md" },
+      { kind: "git_commit", value: "a".repeat(40) },
+    ]);
   });
 
   it("cannot settle with a claim that expired during child execution", async () => {

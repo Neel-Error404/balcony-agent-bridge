@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +21,7 @@ describe("PinnedGitEvidenceProvider", () => {
   it("returns committed blob content with exact Git metadata", () => {
     const repository = createRepository();
     const revision = git(repository, ["rev-parse", "HEAD"]);
-    const provider = new PinnedGitEvidenceProvider();
+    const provider = pinnedProvider();
 
     const evidence = provider.collect({
       project: "bridge",
@@ -53,7 +54,7 @@ describe("PinnedGitEvidenceProvider", () => {
     const revision = git(repository, ["rev-parse", "HEAD"]);
 
     expect(() =>
-      new PinnedGitEvidenceProvider().collect({
+      pinnedProvider().collect({
         project: "bridge",
         projectRoot: repository,
         revision: "0".repeat(revision.length),
@@ -71,7 +72,7 @@ describe("PinnedGitEvidenceProvider", () => {
     );
 
     expect(() =>
-      new PinnedGitEvidenceProvider().collect({
+      pinnedProvider().collect({
         project: "bridge",
         projectRoot: repository,
         revision,
@@ -88,7 +89,7 @@ describe("PinnedGitEvidenceProvider", () => {
       "Mutable working-tree content.\n",
     );
 
-    const evidence = new PinnedGitEvidenceProvider({
+    const evidence = pinnedProvider({
       requireClean: false,
     }).collect({
       project: "bridge",
@@ -108,7 +109,7 @@ describe("PinnedGitEvidenceProvider", () => {
     fs.writeFileSync(path.join(repository, "untracked.md"), "Untracked.\n");
 
     expect(() =>
-      new PinnedGitEvidenceProvider({ requireClean: false }).collect({
+      pinnedProvider({ requireClean: false }).collect({
         project: "bridge",
         projectRoot: repository,
         revision,
@@ -124,7 +125,7 @@ describe("PinnedGitEvidenceProvider", () => {
     git(repository, ["commit", "-m", "add synthetic credential"]);
     const unsafeRevision = git(repository, ["rev-parse", "HEAD"]);
     expect(() =>
-      new PinnedGitEvidenceProvider({ requireClean: false }).collect({
+      pinnedProvider({ requireClean: false }).collect({
         project: "bridge",
         projectRoot: repository,
         revision: unsafeRevision,
@@ -149,7 +150,7 @@ describe("PinnedGitEvidenceProvider", () => {
     const revision = git(repository, ["rev-parse", "HEAD"]);
 
     expect(() =>
-      new PinnedGitEvidenceProvider({ requireClean: false }).collect({
+      pinnedProvider({ requireClean: false }).collect({
         project: "bridge",
         projectRoot: repository,
         revision,
@@ -186,4 +187,45 @@ function git(repository: string, arguments_: string[]): string {
     throw new Error(result.stderr.trim() || "Git test command failed");
   }
   return result.stdout.trim();
+}
+
+function pinnedProvider(
+  overrides: { requireClean?: boolean } = {},
+): PinnedGitEvidenceProvider {
+  const gitExecutable = findGitExecutable();
+  return new PinnedGitEvidenceProvider({
+    ...overrides,
+    gitExecutable,
+    gitExecutableSha256: createHash("sha256")
+      .update(fs.readFileSync(gitExecutable))
+      .digest("hex"),
+  });
+
+  it("rejects an executable whose bytes do not match the approved pin", () => {
+    expect(
+      () =>
+        new PinnedGitEvidenceProvider({
+          gitExecutable: findGitExecutable(),
+          gitExecutableSha256: "0".repeat(64),
+        }),
+    ).toThrow(/approved SHA-256/);
+  });
+}
+
+function findGitExecutable(): string {
+  const candidates = (process.env["PATH"] ?? "")
+    .split(path.delimiter)
+    .flatMap((directory) => [
+      path.join(directory, process.platform === "win32" ? "git.exe" : "git"),
+    ]);
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) {
+        return fs.realpathSync.native(candidate);
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Git executable was not found on PATH for the component test.");
 }

@@ -36,6 +36,62 @@ describe("bridge envelope", () => {
     expect(envelope.target_system).toBe("SYS-B");
   });
 
+  it("accepts a durable bridge-message evidence reference", () => {
+    const envelope = createEnvelope({
+      idempotencyKey: "bridge-evidence-reference",
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      causationId: "22222222-2222-4222-8222-222222222222",
+      payload: {
+        subject: "Peer evidence",
+        body: "The peer result supports this answer.",
+        evidence: [
+          {
+            kind: "bridge_message",
+            value: "11111111-1111-4111-8111-111111111111",
+          },
+        ],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: "22222222-2222-4222-8222-222222222222",
+          outcome: "completed",
+        },
+      },
+    });
+
+    expect(envelope.payload.evidence).toEqual([
+      {
+        kind: "bridge_message",
+        value: "11111111-1111-4111-8111-111111111111",
+      },
+    ]);
+  });
+
+  it("rejects a bridge-message reference that is not a message UUID", () => {
+    expect(() =>
+      createEnvelope({
+        idempotencyKey: "invalid-bridge-evidence-reference",
+        originSystem: "SYS-A",
+        targetSystem: "SYS-B",
+        kind: "task_result",
+        streamId: "agent-coordination",
+        causationId: "22222222-2222-4222-8222-222222222222",
+        payload: {
+          subject: "Invalid peer evidence",
+          body: "This result has an invalid peer reference.",
+          evidence: [{ kind: "bridge_message", value: "not-a-message-id" }],
+          coordination_result: {
+            protocol_version: "1.0",
+            request_message_id: "22222222-2222-4222-8222-222222222222",
+            outcome: "completed",
+          },
+        },
+      }),
+    ).toThrow(/message UUID/);
+  });
+
   it("rejects messages addressed to the origin system", () => {
     expect(() =>
       createEnvelope({

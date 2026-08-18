@@ -19,6 +19,8 @@ The provider:
 - verifies each path is a tracked regular blob at the pinned revision;
 - reads bytes from the Git object database rather than the working tree;
 - preserves the exact commit and blob object IDs;
+- requires an independently hashed Git executable and never falls back to a
+  PATH-resolved command;
 - applies the existing extension, size, UTF-8, binary, and secret controls;
 - returns branch, worktree state, and commit time without returning a local
   repository path; and
@@ -40,8 +42,15 @@ Bridge status includes bounded consultation counts for:
 - `failed`.
 
 It may also include the consultation coordinator heartbeat timestamp, runtime
-state, and sanitized last error code. Status never includes evidence content,
+state, heartbeat age, last process-reported state, sanitized last error code,
+and aggregate evidence item/byte counts. Heartbeat age converts an old
+otherwise-healthy report to `stale`. Status never includes evidence content,
 local paths, child output, Git remotes, message bodies, or credentials.
+
+The coordinator persists the evidence paths cited by a completed child and
+returns only structured provenance references. Pinned files produce repository
+path and commit references; evidence received from a nested peer produces a
+bridge-message reference. Uncited bundle items are not promoted.
 
 ## Consequences
 

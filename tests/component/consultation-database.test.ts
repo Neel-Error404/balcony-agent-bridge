@@ -119,7 +119,9 @@ describe("durable consultation runs", () => {
       new Date("2026-08-17T13:00:00.000Z"),
     );
 
-    expect(database.getStatus()).toMatchObject({
+    expect(
+      database.getStatus(new Date("2026-08-17T13:00:30.000Z")),
+    ).toMatchObject({
       consultation: {
         pending_child: 0,
         needs_information: 1,
@@ -128,8 +130,67 @@ describe("durable consultation runs", () => {
         failed: 0,
       },
       consultationCoordinatorRuntimeStatus: "healthy",
+      consultationCoordinatorReportedStatus: "healthy",
+      consultationCoordinatorHeartbeatAgeSeconds: 30,
       consultationCoordinatorHeartbeatAtUtc:
         "2026-08-17T13:00:00.000Z",
+    });
+  });
+
+  it("classifies expired runtime heartbeats and reports bounded evidence totals", () => {
+    const database = openDatabase(":memory:");
+    const initial = initialRun();
+    const content = "Bridge docs.\n";
+    database.ensureConsultationRun({
+      ...initial,
+      evidence: {
+        ...initial.evidence,
+        total_bytes: Buffer.byteLength(content),
+        items: [
+          {
+            path: "README.md",
+            source: "local_project",
+            content,
+            sha256:
+              "9a7592441e3559d2034a0df4e059904f0ef686bc11e4a3984007dbd9f77c2260",
+            byte_length: Buffer.byteLength(content),
+            modified_at_utc: "2026-08-17T12:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const heartbeat = new Date("2026-08-17T12:00:00.000Z");
+    database.recordBridgeHeartbeat("bridge", "healthy", undefined, heartbeat);
+    database.recordDispatcherHeartbeat(
+      "dispatcher",
+      "healthy",
+      undefined,
+      heartbeat,
+    );
+    database.recordConsultationCoordinatorHeartbeat(
+      "consultation",
+      "healthy",
+      undefined,
+      heartbeat,
+    );
+
+    expect(
+      database.getStatus(new Date("2026-08-17T12:31:00.000Z")),
+    ).toMatchObject({
+      bridgeRuntimeStatus: "stale",
+      bridgeReportedStatus: "healthy",
+      bridgeHeartbeatAgeSeconds: 1860,
+      dispatcherRuntimeStatus: "stale",
+      dispatcherReportedStatus: "healthy",
+      dispatcherHeartbeatAgeSeconds: 1860,
+      consultationCoordinatorRuntimeStatus: "stale",
+      consultationCoordinatorReportedStatus: "healthy",
+      consultationCoordinatorHeartbeatAgeSeconds: 1860,
+      consultationEvidence: {
+        runsWithEvidence: 1,
+        items: 1,
+        totalBytes: Buffer.byteLength(content),
+      },
     });
   });
 
@@ -171,6 +232,7 @@ function initialRun(): ConsultationRun {
       total_bytes: 0,
       items: [],
     },
+    final_evidence_paths: [],
     version: 0,
     created_at_utc: "2026-08-17T12:00:00.000Z",
     updated_at_utc: "2026-08-17T12:00:00.000Z",

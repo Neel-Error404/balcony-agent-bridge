@@ -81,6 +81,10 @@ export const ConsultationRunSchema = z
     next_attempt_at_utc: z.string().datetime({ offset: true }).optional(),
     error_code: z.string().trim().min(1).max(120).optional(),
     final_answer: z.string().trim().min(1).max(48_000).optional(),
+    final_evidence_paths: z
+      .array(EvidenceRelativePathSchema)
+      .max(16)
+      .default([]),
     version: z.number().int().nonnegative(),
     created_at_utc: z.string().datetime({ offset: true }),
     updated_at_utc: z.string().datetime({ offset: true }),
@@ -133,6 +137,20 @@ export const ConsultationRunSchema = z
         message: "completed consultation run requires final_answer.",
         path: ["final_answer"],
       });
+    }
+    const suppliedPaths = new Set(
+      value.evidence.items.map((item) =>
+        item.path.replaceAll("\\", "/").toLowerCase(),
+      ),
+    );
+    for (const [index, citedPath] of value.final_evidence_paths.entries()) {
+      if (!suppliedPaths.has(citedPath.replaceAll("\\", "/").toLowerCase())) {
+        context.addIssue({
+          code: "custom",
+          message: "Final consultation evidence must come from the durable bundle.",
+          path: ["final_evidence_paths", index],
+        });
+      }
     }
     if (value.state === "failed" && !value.error_code) {
       context.addIssue({

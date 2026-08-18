@@ -108,19 +108,35 @@ export interface EnsureConsultationRunResult {
 
 export type AcknowledgeOutcome = "processed" | "rejected" | "retry";
 
+export type EffectiveRuntimeStatus = "healthy" | "degraded" | "stale";
+
+const BRIDGE_STALE_AFTER_MS = 30 * 60 * 1000;
+const DISPATCHER_STALE_AFTER_MS = 10 * 60 * 1000;
+
 export interface BridgeStatus {
   outbox: Record<OutboxState, number>;
   inbox: Record<InboxState, number>;
   consultation: Record<ConsultationRunState, number>;
+  consultationEvidence: {
+    runsWithEvidence: number;
+    items: number;
+    totalBytes: number;
+  };
   oldestPendingCreatedAtUtc?: string;
   bridgeHeartbeatAtUtc?: string;
-  bridgeRuntimeStatus?: string;
+  bridgeHeartbeatAgeSeconds?: number;
+  bridgeRuntimeStatus?: EffectiveRuntimeStatus;
+  bridgeReportedStatus?: string;
   lastTransportErrorCode?: string;
   dispatcherHeartbeatAtUtc?: string;
-  dispatcherRuntimeStatus?: string;
+  dispatcherHeartbeatAgeSeconds?: number;
+  dispatcherRuntimeStatus?: EffectiveRuntimeStatus;
+  dispatcherReportedStatus?: string;
   lastDispatcherErrorCode?: string;
   consultationCoordinatorHeartbeatAtUtc?: string;
-  consultationCoordinatorRuntimeStatus?: string;
+  consultationCoordinatorHeartbeatAgeSeconds?: number;
+  consultationCoordinatorRuntimeStatus?: EffectiveRuntimeStatus;
+  consultationCoordinatorReportedStatus?: string;
   lastConsultationCoordinatorErrorCode?: string;
 }
 
@@ -1214,7 +1230,7 @@ export class BridgeDatabase {
       .run(component, instanceId, status, now.toISOString(), safeCode);
   }
 
-  public getStatus(): BridgeStatus {
+  public getStatus(now = new Date()): BridgeStatus {
     const outbox = countByState<OutboxState>(
       this.database,
       "outbox",
@@ -1236,6 +1252,29 @@ export class BridgeDatabase {
         "failed",
       ],
     );
+    const consultationEvidence = this.database
+      .prepare(
+        `SELECT
+           COALESCE(SUM(
+             CASE
+               WHEN json_array_length(
+                 json_extract(run_json, '$.evidence.items')
+               ) > 0 THEN 1 ELSE 0
+             END
+           ), 0) AS runs_with_evidence,
+           COALESCE(SUM(
+             json_array_length(json_extract(run_json, '$.evidence.items'))
+           ), 0) AS items,
+           COALESCE(SUM(
+             CAST(json_extract(run_json, '$.evidence.total_bytes') AS INTEGER)
+           ), 0) AS total_bytes
+         FROM consultation_runs`,
+      )
+      .get() as {
+      runs_with_evidence: number;
+      items: number;
+      total_bytes: number;
+    };
     const oldest = this.database
       .prepare(
         `SELECT MIN(created_at_utc) AS created_at_utc
@@ -1280,17 +1319,42 @@ export class BridgeDatabase {
         }
       | undefined;
 
+    const bridgeHealth = runtime
+      ? effectiveRuntimeStatus(runtime, now, BRIDGE_STALE_AFTER_MS)
+      : undefined;
+    const dispatcherHealth = dispatcherRuntime
+      ? effectiveRuntimeStatus(
+          dispatcherRuntime,
+          now,
+          DISPATCHER_STALE_AFTER_MS,
+        )
+      : undefined;
+    const consultationHealth = consultationRuntime
+      ? effectiveRuntimeStatus(
+          consultationRuntime,
+          now,
+          DISPATCHER_STALE_AFTER_MS,
+        )
+      : undefined;
+
     return {
       outbox,
       inbox,
       consultation,
+      consultationEvidence: {
+        runsWithEvidence: consultationEvidence.runs_with_evidence,
+        items: consultationEvidence.items,
+        totalBytes: consultationEvidence.total_bytes,
+      },
       ...(oldest.created_at_utc
         ? { oldestPendingCreatedAtUtc: oldest.created_at_utc }
         : {}),
       ...(runtime
         ? {
             bridgeHeartbeatAtUtc: runtime.heartbeat_at_utc,
-            bridgeRuntimeStatus: runtime.status,
+            bridgeHeartbeatAgeSeconds: bridgeHealth!.ageSeconds,
+            bridgeRuntimeStatus: bridgeHealth!.status,
+            bridgeReportedStatus: runtime.status,
             ...(runtime.last_error
               ? { lastTransportErrorCode: runtime.last_error }
               : {}),
@@ -1300,7 +1364,10 @@ export class BridgeDatabase {
         ? {
             dispatcherHeartbeatAtUtc:
               dispatcherRuntime.heartbeat_at_utc,
-            dispatcherRuntimeStatus: dispatcherRuntime.status,
+            dispatcherHeartbeatAgeSeconds:
+              dispatcherHealth!.ageSeconds,
+            dispatcherRuntimeStatus: dispatcherHealth!.status,
+            dispatcherReportedStatus: dispatcherRuntime.status,
             ...(dispatcherRuntime.last_error
               ? {
                   lastDispatcherErrorCode:
@@ -1314,6 +1381,10 @@ export class BridgeDatabase {
             consultationCoordinatorHeartbeatAtUtc:
               consultationRuntime.heartbeat_at_utc,
             consultationCoordinatorRuntimeStatus:
+              consultationHealth!.status,
+            consultationCoordinatorHeartbeatAgeSeconds:
+              consultationHealth!.ageSeconds,
+            consultationCoordinatorReportedStatus:
               consultationRuntime.status,
             ...(consultationRuntime.last_error
               ? {
@@ -1637,4 +1708,25 @@ function countByState<T extends string>(
     counts[row.state] = row.count;
   }
   return counts;
+}
+
+function effectiveRuntimeStatus(
+  runtime: { status: string; heartbeat_at_utc: string },
+  now: Date,
+  staleAfterMs: number,
+): { status: EffectiveRuntimeStatus; ageSeconds: number } {
+  const heartbeatAt = Date.parse(runtime.heartbeat_at_utc);
+  if (!Number.isFinite(heartbeatAt)) {
+    return { status: "stale", ageSeconds: 0 };
+  }
+  const ageMs = Math.max(0, now.getTime() - heartbeatAt);
+  return {
+    status:
+      ageMs > staleAfterMs
+        ? "stale"
+        : runtime.status === "healthy"
+          ? "healthy"
+          : "degraded",
+    ageSeconds: Math.floor(ageMs / 1000),
+  };
 }

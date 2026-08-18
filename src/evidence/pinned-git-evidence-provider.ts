@@ -65,25 +65,12 @@ const PolicySchema = z
       .min(1)
       .max(64)
       .default([...DEFAULT_ALLOWED_EXTENSIONS]),
-    gitExecutable: z.string().trim().min(1).optional(),
+    gitExecutable: z.string().trim().min(1),
     gitExecutableSha256: z
       .string()
-      .regex(/^[a-f0-9]{64}$/iu)
-      .optional(),
+      .regex(/^[a-f0-9]{64}$/iu),
   })
-  .strict()
-  .superRefine((value, context) => {
-    if (
-      Boolean(value.gitExecutable) !==
-      Boolean(value.gitExecutableSha256)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message:
-          "gitExecutable and gitExecutableSha256 must be supplied together.",
-      });
-    }
-  });
+  .strict();
 
 const CollectionInputSchema = z
   .object({
@@ -103,8 +90,8 @@ export interface PinnedGitEvidencePolicy {
   maxFileBytes?: number;
   maxTotalBytes?: number;
   allowedExtensions?: string[];
-  gitExecutable?: string;
-  gitExecutableSha256?: string;
+  gitExecutable: string;
+  gitExecutableSha256: string;
 }
 
 export interface PinnedGitEvidenceInput {
@@ -119,7 +106,7 @@ export class PinnedGitEvidenceProvider {
   private readonly policy: z.infer<typeof PolicySchema>;
   private readonly gitExecutable: string;
 
-  public constructor(policy: PinnedGitEvidencePolicy = {}) {
+  public constructor(policy: PinnedGitEvidencePolicy) {
     this.policy = PolicySchema.parse(policy);
     this.gitExecutable = resolveGitExecutable(
       this.policy.gitExecutable,
@@ -412,12 +399,9 @@ function gitBuffer(
 }
 
 function resolveGitExecutable(
-  executable: string | undefined,
-  expectedSha256: string | undefined,
+  executable: string,
+  expectedSha256: string,
 ): string {
-  if (!executable || !expectedSha256) {
-    return "git";
-  }
   const resolved = path.resolve(executable);
   let actual: string;
   try {

@@ -27,10 +27,28 @@ export type MessageKind = z.infer<typeof MessageKindSchema>;
 
 export const EvidenceReferenceSchema = z
   .object({
-    kind: z.enum(["repository_path", "git_commit", "obsidian_note", "test_run"]),
+    kind: z.enum([
+      "repository_path",
+      "git_commit",
+      "obsidian_note",
+      "test_run",
+      "bridge_message",
+    ]),
     value: z.string().trim().min(1).max(1024),
   })
-  .strict();
+  .strict()
+  .superRefine((reference, context) => {
+    if (
+      reference.kind === "bridge_message" &&
+      !z.string().uuid().safeParse(reference.value).success
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A bridge-message evidence reference must be a message UUID.",
+        path: ["value"],
+      });
+    }
+  });
 
 export const ReadOnlyDispatchSchema = z
   .object({
