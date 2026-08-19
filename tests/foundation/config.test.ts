@@ -91,6 +91,7 @@ describe("bridge configuration", () => {
       BALCONY_DISPATCHER_POLL_INTERVAL_MS: "1500",
       BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS: "120",
       BALCONY_DISPATCHER_MAX_OUTPUT_BYTES: "32000",
+      BALCONY_DISPATCHER_NOT_BEFORE_UTC: "2026-08-19T07:00:00+00:00",
     });
 
     expect(config.systemId).toBe("SYS-A");
@@ -100,6 +101,22 @@ describe("bridge configuration", () => {
     expect(config.maxOutputBytes).toBe(32000);
     expect(config.codexExecutableSha256).toBe("a".repeat(64));
     expect(config.trustedPath).toBe("C:\\trusted-node");
+    expect(config.notBeforeUtc).toBe("2026-08-19T07:00:00.000Z");
+  });
+
+  it("rejects an invalid dispatcher activation cutoff", () => {
+    expect(() =>
+      loadReadOnlyDispatcherConfig({
+        BALCONY_SYSTEM_ID: "SYS-A",
+        BALCONY_DISPATCHER_PROJECTS_PATH:
+          "D:\\local\\dispatcher-projects.json",
+        BALCONY_CODEX_EXECUTABLE: "D:\\tools\\codex.exe",
+        BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+        BALCONY_DISPATCHER_CODEX_HOME: "D:\\local\\codex-home",
+        BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
+        BALCONY_DISPATCHER_NOT_BEFORE_UTC: "not-a-timestamp",
+      }),
+    ).toThrow(/BALCONY_DISPATCHER_NOT_BEFORE_UTC/);
   });
 
   it("fails closed when dispatcher execution paths are not declared", () => {

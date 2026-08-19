@@ -33,3 +33,10 @@ After installation, test start, stop, restart, process termination, Azure
 unavailability, reboot startup, database access, log rotation, and service
 recovery. The Codex MCP entry may remain enabled because it has no Azure
 credentials; queued work stays local while the bridge service is unavailable.
+
+This installer deploys only the Azure bridge transport worker. Keep the
+restricted Codex dispatcher as a separate service so the transport receives
+Azure credentials but no Codex credentials, while the dispatcher receives a
+dedicated Codex home but no Azure variables. Its manual-first installation and
+owner-approved automatic activation are documented in
+`docs/runbooks/read-only-dispatcher.md`.

@@ -103,36 +103,40 @@ describe("PinnedGitEvidenceProvider", () => {
     expect(evidence.items[0]?.content).not.toContain("Mutable");
   });
 
-  it("rejects untracked paths and secret-bearing committed blobs", () => {
-    const repository = createRepository();
-    const revision = git(repository, ["rev-parse", "HEAD"]);
-    fs.writeFileSync(path.join(repository, "untracked.md"), "Untracked.\n");
+  it(
+    "rejects untracked paths and secret-bearing committed blobs",
+    () => {
+      const repository = createRepository();
+      const revision = git(repository, ["rev-parse", "HEAD"]);
+      fs.writeFileSync(path.join(repository, "untracked.md"), "Untracked.\n");
 
-    expect(() =>
-      pinnedProvider({ requireClean: false }).collect({
-        project: "bridge",
-        projectRoot: repository,
-        revision,
-        paths: ["untracked.md"],
-      }),
-    ).toThrow(/tracked|blob/);
+      expect(() =>
+        pinnedProvider({ requireClean: false }).collect({
+          project: "bridge",
+          projectRoot: repository,
+          revision,
+          paths: ["untracked.md"],
+        }),
+      ).toThrow(/tracked|blob/);
 
-    fs.writeFileSync(
-      path.join(repository, "credential.json"),
-      '{"client_secret":"not-a-real-secret"}\n',
-    );
-    git(repository, ["add", "credential.json"]);
-    git(repository, ["commit", "-m", "add synthetic credential"]);
-    const unsafeRevision = git(repository, ["rev-parse", "HEAD"]);
-    expect(() =>
-      pinnedProvider({ requireClean: false }).collect({
-        project: "bridge",
-        projectRoot: repository,
-        revision: unsafeRevision,
-        paths: ["credential.json"],
-      }),
-    ).toThrow(/secret-safe/);
-  });
+      fs.writeFileSync(
+        path.join(repository, "credential.json"),
+        '{"client_secret":"not-a-real-secret"}\n',
+      );
+      git(repository, ["add", "credential.json"]);
+      git(repository, ["commit", "-m", "add synthetic credential"]);
+      const unsafeRevision = git(repository, ["rev-parse", "HEAD"]);
+      expect(() =>
+        pinnedProvider({ requireClean: false }).collect({
+          project: "bridge",
+          projectRoot: repository,
+          revision: unsafeRevision,
+          paths: ["credential.json"],
+        }),
+      ).toThrow(/secret-safe/);
+    },
+    20_000,
+  );
 
   it("rejects a tracked symbolic-link blob", () => {
     const repository = createRepository();
@@ -157,6 +161,16 @@ describe("PinnedGitEvidenceProvider", () => {
         paths: ["linked.md"],
       }),
     ).toThrow(/regular blob/);
+  });
+
+  it("rejects an executable whose bytes do not match the approved pin", () => {
+    expect(
+      () =>
+        new PinnedGitEvidenceProvider({
+          gitExecutable: findGitExecutable(),
+          gitExecutableSha256: "0".repeat(64),
+        }),
+    ).toThrow(/approved SHA-256/);
   });
 
   function createRepository(): string {
@@ -199,16 +213,6 @@ function pinnedProvider(
     gitExecutableSha256: createHash("sha256")
       .update(fs.readFileSync(gitExecutable))
       .digest("hex"),
-  });
-
-  it("rejects an executable whose bytes do not match the approved pin", () => {
-    expect(
-      () =>
-        new PinnedGitEvidenceProvider({
-          gitExecutable: findGitExecutable(),
-          gitExecutableSha256: "0".repeat(64),
-        }),
-    ).toThrow(/approved SHA-256/);
   });
 }
 

@@ -79,6 +79,10 @@ const DispatcherEnvironmentSchema = z
       .min(1024)
       .max(60_000)
       .default(48_000),
+    BALCONY_DISPATCHER_NOT_BEFORE_UTC: z
+      .string()
+      .datetime({ offset: true })
+      .optional(),
     BALCONY_DISPATCHER_MODE: z
       .enum(["legacy", "consultation"])
       .default("legacy"),
@@ -126,6 +130,7 @@ export interface ReadOnlyDispatcherConfig {
   pollIntervalMs: number;
   defaultTimeoutSeconds: number;
   maxOutputBytes: number;
+  notBeforeUtc?: string;
   mode?: "legacy" | "consultation";
   consultationWorkingDirectory?: string;
   gitExecutable?: string;
@@ -229,6 +234,13 @@ export function loadReadOnlyDispatcherConfig(
     defaultTimeoutSeconds:
       result.data.BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS,
     maxOutputBytes: result.data.BALCONY_DISPATCHER_MAX_OUTPUT_BYTES,
+    ...(result.data.BALCONY_DISPATCHER_NOT_BEFORE_UTC
+      ? {
+          notBeforeUtc: new Date(
+            result.data.BALCONY_DISPATCHER_NOT_BEFORE_UTC,
+          ).toISOString(),
+        }
+      : {}),
     mode: result.data.BALCONY_DISPATCHER_MODE,
     ...(result.data.BALCONY_CONSULTATION_WORKING_DIRECTORY
       ? {

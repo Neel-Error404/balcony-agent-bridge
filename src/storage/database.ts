@@ -960,7 +960,13 @@ export class BridgeDatabase {
     limit: number,
     leaseSeconds: number,
     now = new Date(),
+    notBeforeUtc?: string,
   ): ClaimedInboxMessage[] {
+    const notBeforeFilter = notBeforeUtc
+      ? `AND julianday(
+           json_extract(envelope_json, '$.created_at_utc')
+         ) >= julianday(?)`
+      : "";
     return this.claimInboxWhere(
       consumerId,
       limit,
@@ -968,8 +974,9 @@ export class BridgeDatabase {
       `AND kind = 'task_request'
        AND json_extract(envelope_json, '$.payload.dispatch.executor') = 'codex_cli'
        AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'
-       AND json_extract(envelope_json, '$.payload.dispatch.evidence_mode') IS NULL`,
-      [],
+       AND json_extract(envelope_json, '$.payload.dispatch.evidence_mode') IS NULL
+       ${notBeforeFilter}`,
+      notBeforeUtc ? [notBeforeUtc] : [],
       now,
     );
   }

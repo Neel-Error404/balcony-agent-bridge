@@ -46,6 +46,11 @@ BALCONY_DISPATCHER_TRUSTED_PATH
 BALCONY_DISPATCHER_POLL_INTERVAL_MS
 BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS
 BALCONY_DISPATCHER_MAX_OUTPUT_BYTES
+BALCONY_DISPATCHER_NOT_BEFORE_UTC
+BALCONY_DISPATCHER_MODE
+BALCONY_CONSULTATION_WORKING_DIRECTORY
+BALCONY_GIT_EXECUTABLE
+BALCONY_GIT_EXECUTABLE_SHA256
 ```
 
 Do not provide Azure namespace, identity, certificate, token, connection
@@ -126,3 +131,35 @@ delivery, and caller-visible result chain.
 Do not place passwords, API keys, access tokens, or copied interactive login
 material in WinSW XML, Task Scheduler arguments, repository files, Obsidian,
 or bridge messages.
+
+### Restricted Windows service procedure
+
+Use `scripts/Install-DispatcherService.ps1` only from an elevated shell and
+only against a clean checkout whose `HEAD` equals the owner-approved full
+revision. The installer verifies the native Codex and Git executable hashes,
+the owner-approved WinSW wrapper hash,
+requires registry schema `1.2` with exactly one initial pinned project, and
+registers `BalconyAgentDispatcher` under its Windows virtual service identity.
+It deliberately leaves startup set to `Manual` and does not start the service.
+
+Authenticate the dedicated ProgramData `codex-home` directly; do not copy an
+interactive user's auth files. Then start the service manually, complete the
+foreground/service acceptance checklist, and run
+`scripts/Test-DispatcherRuntimeSafety.ps1`. Only after a live request/result
+round trip succeeds may an elevated operator run
+`scripts/Enable-DispatcherAutomaticStartup.ps1 -OwnerApproved`. That final
+step selects delayed automatic startup at Windows boot. Re-run the safety
+check with `-RequireAutomatic` after activation and again after a reboot.
+
+The installer defaults to legacy mode so ordinary read-only coordination
+requests receive an automatic result or an explicit policy rejection. Select
+consultation mode only for pinned-Git consultation requests. One service runs
+one mode; do not install competing copies casually. Add further projects one
+at a time only after their own privacy review, exact revision pin, and
+acceptance evidence.
+
+Set the mandatory `NotBeforeUtc` installation cutoff after the newest obsolete
+request and at or before the first explicitly accepted activation probe. The
+legacy dispatcher will not claim older requests even when they remain
+available in the durable inbox. Record the chosen cutoff in machine-local
+deployment evidence; do not silently widen it during an upgrade.

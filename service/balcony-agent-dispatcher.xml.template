@@ -1,0 +1,37 @@
+<service>
+  <id>BalconyAgentDispatcher</id>
+  <name>Balcony Agent Dispatcher</name>
+  <description>Restricted read-only Codex dispatcher for Balcony agent coordination.</description>
+  <executable>__NODE_EXECUTABLE__</executable>
+  <arguments>__DISPATCHER_ENTRYPOINT__</arguments>
+  <workingdirectory>__WORKING_DIRECTORY__</workingdirectory>
+  <startmode>Manual</startmode>
+  <env name="BALCONY_SYSTEM_ID" value="__SYSTEM_ID__" />
+  <env name="BALCONY_BRIDGE_DB_PATH" value="__DATABASE_PATH__" />
+  <env name="BALCONY_DISPATCHER_PROJECTS_PATH" value="__PROJECT_REGISTRY_PATH__" />
+  <env name="BALCONY_CODEX_EXECUTABLE" value="__CODEX_EXECUTABLE__" />
+  <env name="BALCONY_CODEX_EXECUTABLE_SHA256" value="__CODEX_EXECUTABLE_SHA256__" />
+  <env name="BALCONY_DISPATCHER_CODEX_HOME" value="__CODEX_HOME__" />
+  <env name="BALCONY_DISPATCHER_TRUSTED_PATH" value="__TRUSTED_PATH__" />
+  <env name="BALCONY_DISPATCHER_POLL_INTERVAL_MS" value="__POLL_INTERVAL_MS__" />
+  <env name="BALCONY_DISPATCHER_DEFAULT_TIMEOUT_SECONDS" value="__DEFAULT_TIMEOUT_SECONDS__" />
+  <env name="BALCONY_DISPATCHER_MAX_OUTPUT_BYTES" value="__MAX_OUTPUT_BYTES__" />
+  <env name="BALCONY_DISPATCHER_NOT_BEFORE_UTC" value="__NOT_BEFORE_UTC__" />
+  <env name="BALCONY_DISPATCHER_MODE" value="__DISPATCHER_MODE__" />
+  <env name="BALCONY_CONSULTATION_WORKING_DIRECTORY" value="__WORKING_DIRECTORY__" />
+  <env name="BALCONY_GIT_EXECUTABLE" value="__GIT_EXECUTABLE__" />
+  <env name="BALCONY_GIT_EXECUTABLE_SHA256" value="__GIT_EXECUTABLE_SHA256__" />
+  <logpath>__LOG_PATH__</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyyMMdd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+    <zipOlderThanNumDays>7</zipOlderThanNumDays>
+    <zipDateFormat>yyyyMMdd</zipDateFormat>
+    <keepFiles>30</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>45 sec</stoptimeout>
+</service>

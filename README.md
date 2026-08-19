@@ -118,6 +118,11 @@ The process uses the same SQLite database as MCP and the Azure bridge but does
 not authenticate to Azure. See `docs/runbooks/read-only-dispatcher.md` before
 enabling background startup.
 
+For unattended legacy dispatch, set an explicit
+`BALCONY_DISPATCHER_NOT_BEFORE_UTC` activation cutoff so historical available
+requests are not executed after the dispatcher is first enabled. The Windows
+service installer makes that cutoff mandatory.
+
 `peer_readable: true` approves the entire configured project tree for read-only
 inspection by the peer system. Do not register a project that contains
 machine-private credentials, local `.env` files, private keys, connection

@@ -219,6 +219,32 @@ describe("BridgeDatabase", () => {
       consultationClaims.map((item) => item.envelope.message_id),
     ).toEqual([consultation.message_id]);
   });
+
+  it("does not claim legacy requests older than the activation cutoff", () => {
+    const legacy = coordinationEnvelope("legacy-cutoff", undefined);
+    database.persistIncoming(legacy, 1);
+
+    expect(
+      database.claimReadOnlyDispatchInbox(
+        "legacy-dispatcher",
+        10,
+        60,
+        new Date("2026-08-19T08:00:00.000Z"),
+        "2099-01-01T00:00:00.000Z",
+      ),
+    ).toHaveLength(0);
+
+    const claimed = database.claimReadOnlyDispatchInbox(
+      "legacy-dispatcher",
+      10,
+      60,
+      new Date("2026-08-19T08:00:00.000Z"),
+      "2000-01-01T00:00:00.000Z",
+    );
+    expect(claimed.map((item) => item.envelope.message_id)).toEqual([
+      legacy.message_id,
+    ]);
+  });
 });
 
 function envelope(idempotencyKey: string, body: string) {

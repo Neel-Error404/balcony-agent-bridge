@@ -75,6 +75,7 @@ export class ReadOnlyDispatcher {
       1,
       this.timing.claimLeaseSeconds,
       now,
+      this.config.notBeforeUtc,
     );
     for (const claim of claims) {
       await this.processClaim(claim, abortSignal);
