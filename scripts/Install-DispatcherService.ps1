@@ -293,7 +293,7 @@ if ($PSCmdlet.ShouldProcess(
         throw "WinSW failed to install the Balcony Agent Dispatcher service."
     }
 
-    & sc.exe config $serviceName 'obj=' $serviceAccount 'password=' '' | Out-Null
+    & sc.exe config $serviceName 'obj=' $serviceAccount 'password=' '""' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Windows could not assign the restricted virtual service account."
     }

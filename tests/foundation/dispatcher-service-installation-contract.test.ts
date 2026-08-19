@@ -31,6 +31,12 @@ describe("dispatcher Windows service installation contract", () => {
     expect(installer).not.toContain("Start-Service");
   });
 
+  it("passes an explicit empty password token for the virtual account", () => {
+    expect(installer).toContain(
+      "'obj=' $serviceAccount 'password=' '\"\"'",
+    );
+  });
+
   it("pins the release and executable identities before installation", () => {
     expect(installer).toContain("Repository HEAD does not match ApprovedRevision");
     expect(installer).toContain("The dispatcher release worktree must be clean");

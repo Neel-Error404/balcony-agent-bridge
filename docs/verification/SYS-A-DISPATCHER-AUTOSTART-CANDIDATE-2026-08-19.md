@@ -109,3 +109,14 @@ dependency audit with zero vulnerabilities, and `git diff --check` also pass.
 
 Until these gates close, the transport remains operational but SYS-A automatic
 execution remains off.
+
+## Installation repair
+
+The first live installation registered the stopped Manual service, then failed
+before changing its `LocalSystem` default to the restricted virtual identity.
+PowerShell had omitted the empty native argument supplied to `sc.exe`. No ACLs
+were applied, the service never started, and no inbox message was claimed.
+The installer now passes an explicit quoted empty-password token and includes
+a foundation regression test for that native-command boundary. Deployment
+must remove only the incomplete stopped service and rerun the corrected exact
+release before acceptance continues.
