@@ -27,9 +27,13 @@ $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
 if (-not $service) {
     throw "Dispatcher service '$ServiceName' is not installed."
 }
-$expectedAccount = "NT SERVICE\$ServiceName"
+$expectedAccount = "NT AUTHORITY\LocalService"
 if ($service.StartName -ne $expectedAccount) {
-    throw "Dispatcher service is not using its restricted virtual account."
+    throw "Dispatcher service is not using the restricted LocalService account."
+}
+$sidType = (& sc.exe qsidtype $ServiceName | Out-String)
+if ($LASTEXITCODE -ne 0 -or $sidType -notmatch "UNRESTRICTED") {
+    throw "Dispatcher service does not have its unique unrestricted service SID."
 }
 if ($service.State -ne "Running") {
     throw "Dispatcher service must pass live acceptance and be running first."

@@ -52,8 +52,9 @@ Safety properties:
 
 - manual startup after installation; no automatic activation before live
   acceptance;
-- restricted `NT SERVICE\BalconyAgentDispatcher` virtual identity rather than
-  `LocalSystem`;
+- low-privilege `LocalService` logon rather than `LocalSystem`, with an
+  unrestricted unique `NT SERVICE\BalconyAgentDispatcher` SID for dedicated
+  ACL isolation;
 - no Azure variables or credentials in the dispatcher service;
 - exact clean release revision required;
 - independently verified WinSW, native Codex, and Git SHA-256 pins;
@@ -120,3 +121,10 @@ The installer now passes an explicit quoted empty-password token and includes
 a foundation regression test for that native-command boundary. Deployment
 must remove only the incomplete stopped service and rerun the corrected exact
 release before acceptance continues.
+
+Live Windows verification then showed that this host resolves the service SID
+for ACL use but rejects it as the service logon account with native error
+`1057`. The accepted hardened pattern is `LocalService` as the low-privilege
+logon plus the unique unrestricted service SID in the process token. The
+installer, activation check, and runtime safety check now enforce both halves
+of that boundary.

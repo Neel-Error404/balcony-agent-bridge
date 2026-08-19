@@ -15,8 +15,12 @@ if (-not $service) {
 if ($service.State -ne "Running") {
     $issues.Add("SERVICE_NOT_RUNNING")
 }
-if ($service.StartName -ne "NT SERVICE\$ServiceName") {
-    $issues.Add("UNRESTRICTED_SERVICE_IDENTITY")
+if ($service.StartName -ne "NT AUTHORITY\LocalService") {
+    $issues.Add("UNEXPECTED_SERVICE_LOGON_ACCOUNT")
+}
+$sidType = (& sc.exe qsidtype $ServiceName | Out-String)
+if ($LASTEXITCODE -ne 0 -or $sidType -notmatch "UNRESTRICTED") {
+    $issues.Add("SERVICE_SID_NOT_UNRESTRICTED")
 }
 if ($RequireAutomatic -and $service.StartMode -ne "Auto") {
     $issues.Add("AUTOMATIC_STARTUP_NOT_ENABLED")
@@ -38,6 +42,7 @@ if ($children.Count -ne 1) {
         state = $service.State
         startMode = $service.StartMode
         account = $service.StartName
+        uniqueServiceSid = $sidType -match "UNRESTRICTED"
         wrapperProcessId = [int]$service.ProcessId
     }
     childCount = $children.Count

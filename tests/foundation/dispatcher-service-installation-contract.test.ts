@@ -19,10 +19,13 @@ const safetyCheck = read("scripts/Test-DispatcherRuntimeSafety.ps1");
 const template = read("service/balcony-agent-dispatcher.xml.template");
 
 describe("dispatcher Windows service installation contract", () => {
-  it("installs disabled-by-default under a restricted virtual identity", () => {
+  it("installs disabled-by-default under LocalService with a unique service SID", () => {
     expect(template).toContain("<startmode>Manual</startmode>");
     expect(installer).toContain(
-      '$serviceAccount = "NT SERVICE\\$serviceName"',
+      '$serviceAccount = "NT AUTHORITY\\LocalService"',
+    );
+    expect(installer).toContain(
+      '$serviceSidAccount = "NT SERVICE\\$serviceName"',
     );
     expect(installer).toContain(
       "Set-Service -Name $serviceName -StartupType Manual",
@@ -31,9 +34,11 @@ describe("dispatcher Windows service installation contract", () => {
     expect(installer).not.toContain("Start-Service");
   });
 
-  it("passes an explicit empty password token for the virtual account", () => {
-    expect(installer).toContain(
-      "'obj=' $serviceAccount 'password=' '\"\"'",
+  it("uses the documented LocalService command after enabling the service SID", () => {
+    expect(installer).toContain("sc.exe sidtype $serviceName unrestricted");
+    expect(installer).toContain("& cmd.exe /d /s /c $accountCommand");
+    expect(installer.indexOf("sc.exe sidtype")).toBeLessThan(
+      installer.indexOf("& cmd.exe /d /s /c $accountCommand"),
     );
   });
 
@@ -75,6 +80,7 @@ describe("dispatcher Windows service installation contract", () => {
     expect(activator).toContain("start= delayed-auto");
     expect(activator).toContain("must pass live acceptance and be running first");
     expect(safetyCheck).toContain("AUTOMATIC_STARTUP_NOT_ENABLED");
-    expect(safetyCheck).toContain("UNRESTRICTED_SERVICE_IDENTITY");
+    expect(safetyCheck).toContain("UNEXPECTED_SERVICE_LOGON_ACCOUNT");
+    expect(safetyCheck).toContain("SERVICE_SID_NOT_UNRESTRICTED");
   });
 });

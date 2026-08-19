@@ -139,7 +139,10 @@ only against a clean checkout whose `HEAD` equals the owner-approved full
 revision. The installer verifies the native Codex and Git executable hashes,
 the owner-approved WinSW wrapper hash,
 requires registry schema `1.2` with exactly one initial pinned project, and
-registers `BalconyAgentDispatcher` under its Windows virtual service identity.
+registers `BalconyAgentDispatcher` under low-privilege `LocalService` with an
+unrestricted unique `NT SERVICE\BalconyAgentDispatcher` SID. Sensitive ACLs
+are granted to that unique service SID, not to the shared LocalService
+identity.
 It deliberately leaves startup set to `Manual` and does not start the service.
 
 Authenticate the dedicated ProgramData `codex-home` directly; do not copy an

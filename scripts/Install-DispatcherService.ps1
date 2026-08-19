@@ -66,7 +66,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $serviceName = "BalconyAgentDispatcher"
-$serviceAccount = "NT SERVICE\$serviceName"
+$serviceAccount = "NT AUTHORITY\LocalService"
+$serviceSidAccount = "NT SERVICE\$serviceName"
 
 if ($env:BALCONY_SYSTEM_ID -ne $SystemId) {
     throw (
@@ -293,17 +294,22 @@ if ($PSCmdlet.ShouldProcess(
         throw "WinSW failed to install the Balcony Agent Dispatcher service."
     }
 
-    & sc.exe config $serviceName 'obj=' $serviceAccount 'password=' '""' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Windows could not assign the restricted virtual service account."
-    }
     & sc.exe sidtype $serviceName unrestricted | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Windows could not enable the dispatcher service SID."
     }
+    $accountCommand = (
+        'sc.exe config "{0}" obj= "{1}" password= ""' -f
+        $serviceName,
+        $serviceAccount
+    )
+    & cmd.exe /d /s /c $accountCommand | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows could not assign the restricted LocalService account."
+    }
     Set-Service -Name $serviceName -StartupType Manual
 
-    $serviceIdentity = New-Object Security.Principal.NTAccount($serviceAccount)
+    $serviceIdentity = New-Object Security.Principal.NTAccount($serviceSidAccount)
     Add-FileSystemAccessRule -Path $RepositoryRoot `
         -Identity $serviceIdentity -Rights ReadAndExecute
     Add-FileSystemAccessRule -Path $BridgeDataDirectory `
