@@ -82,6 +82,9 @@ describe("ReadOnlyDispatcher", () => {
     expect(executor.inputs[0]?.prompt).toContain(
       "Do not create, edit, delete",
     );
+    expect(executor.inputs[0]?.prompt).toContain(
+      "The validated receiving system ID is SYS-B.",
+    );
     expect(database.getStatus().inbox).toMatchObject({
       available: 1,
       processed: 1,

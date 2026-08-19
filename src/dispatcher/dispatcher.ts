@@ -148,6 +148,7 @@ export class ReadOnlyDispatcher {
             claim.envelope,
             task.prompt,
             history,
+            this.config.systemId,
           ),
           timeoutSeconds: task.timeoutSeconds,
           maxOutputBytes: this.config.maxOutputBytes,
@@ -303,9 +304,11 @@ function buildReadOnlyPrompt(
   envelope: BridgeEnvelope,
   taskPrompt: string,
   threadHistory: string,
+  systemId: ReadOnlyDispatcherConfig["systemId"],
 ): string {
   return [
     "You are a bounded read-only worker responding to a request from the peer Balcony system.",
+    `The validated receiving system ID is ${systemId}. Report this exact value when the request asks for the current or detected system ID.`,
     "Inspect and reason only. Do not create, edit, delete, rename, install, stage, commit, push, deploy, or change configuration.",
     "Do not modify Azure, Git remotes, services, scheduled tasks, credentials, or machine state.",
     "Do not request elevated permissions. If an answer requires mutation, explain what would require owner approval instead.",
