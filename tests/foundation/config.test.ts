@@ -86,6 +86,9 @@ describe("bridge configuration", () => {
         "D:\\local\\dispatcher-projects.json",
       BALCONY_CODEX_EXECUTABLE: "D:\\tools\\codex.ps1",
       BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+      BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE:
+        "D:\\tools\\codex-code-mode-host.exe",
+      BALCONY_CODEX_CODE_MODE_HOST_SHA256: "b".repeat(64),
       BALCONY_DISPATCHER_CODEX_HOME: "D:\\local\\codex-home",
       BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
       BALCONY_DISPATCHER_POLL_INTERVAL_MS: "1500",
@@ -100,6 +103,10 @@ describe("bridge configuration", () => {
     expect(config.defaultTimeoutSeconds).toBe(120);
     expect(config.maxOutputBytes).toBe(32000);
     expect(config.codexExecutableSha256).toBe("a".repeat(64));
+    expect(config.codexCodeModeHostExecutable).toBe(
+      path.resolve("D:\\tools\\codex-code-mode-host.exe"),
+    );
+    expect(config.codexCodeModeHostSha256).toBe("b".repeat(64));
     expect(config.trustedPath).toBe("C:\\trusted-node");
     expect(config.notBeforeUtc).toBe("2026-08-19T07:00:00.000Z");
   });
@@ -112,6 +119,9 @@ describe("bridge configuration", () => {
           "D:\\local\\dispatcher-projects.json",
         BALCONY_CODEX_EXECUTABLE: "D:\\tools\\codex.exe",
         BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+        BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE:
+          "D:\\tools\\codex-code-mode-host.exe",
+        BALCONY_CODEX_CODE_MODE_HOST_SHA256: "b".repeat(64),
         BALCONY_DISPATCHER_CODEX_HOME: "D:\\local\\codex-home",
         BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
         BALCONY_DISPATCHER_NOT_BEFORE_UTC: "not-a-timestamp",
@@ -135,13 +145,16 @@ describe("bridge configuration", () => {
         "E:\\local\\dispatcher-projects.json",
       BALCONY_CODEX_EXECUTABLE: "E:\\tools\\codex.exe",
       BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+      BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE:
+        "E:\\tools\\codex-code-mode-host.exe",
+      BALCONY_CODEX_CODE_MODE_HOST_SHA256: "b".repeat(64),
       BALCONY_DISPATCHER_CODEX_HOME: "E:\\local\\codex-home",
       BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
       BALCONY_DISPATCHER_MODE: "consultation",
       BALCONY_CONSULTATION_WORKING_DIRECTORY:
         "E:\\local\\evidence-only",
       BALCONY_GIT_EXECUTABLE: "C:\\tools\\git.exe",
-      BALCONY_GIT_EXECUTABLE_SHA256: "b".repeat(64),
+      BALCONY_GIT_EXECUTABLE_SHA256: "c".repeat(64),
     });
 
     expect(config).toMatchObject({
@@ -149,7 +162,7 @@ describe("bridge configuration", () => {
       consultationWorkingDirectory:
         path.resolve("E:\\local\\evidence-only"),
       gitExecutable: path.resolve("C:\\tools\\git.exe"),
-      gitExecutableSha256: "b".repeat(64),
+      gitExecutableSha256: "c".repeat(64),
     });
   });
 
@@ -161,6 +174,9 @@ describe("bridge configuration", () => {
           "E:\\local\\dispatcher-projects.json",
         BALCONY_CODEX_EXECUTABLE: "E:\\tools\\codex.exe",
         BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+        BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE:
+          "E:\\tools\\codex-code-mode-host.exe",
+        BALCONY_CODEX_CODE_MODE_HOST_SHA256: "b".repeat(64),
         BALCONY_DISPATCHER_CODEX_HOME: "E:\\local\\codex-home",
         BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
         BALCONY_DISPATCHER_MODE: "consultation",
@@ -168,5 +184,19 @@ describe("bridge configuration", () => {
     ).toThrow(
       /BALCONY_CONSULTATION_WORKING_DIRECTORY|BALCONY_GIT_EXECUTABLE/,
     );
+  });
+
+  it("fails closed when the Codex companion executable is not declared", () => {
+    expect(() =>
+      loadReadOnlyDispatcherConfig({
+        BALCONY_SYSTEM_ID: "SYS-A",
+        BALCONY_DISPATCHER_PROJECTS_PATH:
+          "D:\\local\\dispatcher-projects.json",
+        BALCONY_CODEX_EXECUTABLE: "D:\\tools\\codex.exe",
+        BALCONY_CODEX_EXECUTABLE_SHA256: "a".repeat(64),
+        BALCONY_DISPATCHER_CODEX_HOME: "D:\\local\\codex-home",
+        BALCONY_DISPATCHER_TRUSTED_PATH: "C:\\trusted-node",
+      }),
+    ).toThrow(/BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE/);
   });
 });

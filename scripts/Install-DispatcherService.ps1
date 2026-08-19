@@ -26,6 +26,13 @@ param(
     [string] $CodexExecutableSha256,
 
     [Parameter(Mandatory)]
+    [string] $CodexCodeModeHostExecutable,
+
+    [Parameter(Mandatory)]
+    [ValidatePattern("^[a-f0-9]{64}$")]
+    [string] $CodexCodeModeHostExecutableSha256,
+
+    [Parameter(Mandatory)]
     [string] $GitExecutable,
 
     [Parameter(Mandatory)]
@@ -95,9 +102,25 @@ if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
 $RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 $ProjectRegistryPath = (Resolve-Path -LiteralPath $ProjectRegistryPath).Path
 $CodexExecutable = (Resolve-Path -LiteralPath $CodexExecutable).Path
+$CodexCodeModeHostExecutable = (
+    Resolve-Path -LiteralPath $CodexCodeModeHostExecutable
+).Path
 $GitExecutable = (Resolve-Path -LiteralPath $GitExecutable).Path
 $NodeExecutable = (Resolve-Path -LiteralPath $NodeExecutable).Path
 $WinSwExecutable = (Resolve-Path -LiteralPath $WinSwExecutable).Path
+
+if (
+    (Split-Path -Parent $CodexExecutable) -ne
+    (Split-Path -Parent $CodexCodeModeHostExecutable)
+) {
+    throw "Codex and its code-mode host must come from the same package directory."
+}
+if (
+    (Split-Path -Leaf $CodexCodeModeHostExecutable) -ne
+    "codex-code-mode-host.exe"
+) {
+    throw "The Codex companion must be named codex-code-mode-host.exe."
+}
 
 $dispatcherEntrypoint = Join-Path $RepositoryRoot "dist\dispatcher\index.js"
 $serviceTemplate = Join-Path (
@@ -118,6 +141,11 @@ foreach ($path in @(
 foreach ($pin in @(
     @($WinSwExecutable, $WinSwExecutableSha256, "WinSW"),
     @($CodexExecutable, $CodexExecutableSha256, "Codex"),
+    @(
+        $CodexCodeModeHostExecutable,
+        $CodexCodeModeHostExecutableSha256,
+        "Codex code-mode host"
+    ),
     @($GitExecutable, $GitExecutableSha256, "Git")
 )) {
     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pin[0]).Hash
@@ -207,6 +235,7 @@ $codexHome = Join-Path $InstallRoot "codex-home"
 $serviceExecutable = Join-Path $serviceDirectory "$serviceName.exe"
 $serviceConfiguration = Join-Path $serviceDirectory "$serviceName.xml"
 $installedCodexExecutable = Join-Path $binaryDirectory "codex.exe"
+$installedCodexCodeModeHost = Join-Path $binaryDirectory "codex-code-mode-host.exe"
 
 function Add-FileSystemAccessRule {
     param(
@@ -249,11 +278,25 @@ if ($PSCmdlet.ShouldProcess(
         -Destination $serviceExecutable -Force
     Copy-Item -LiteralPath $CodexExecutable `
         -Destination $installedCodexExecutable -Force
+    Copy-Item -LiteralPath $CodexCodeModeHostExecutable `
+        -Destination $installedCodexCodeModeHost -Force
     $installedCodexHash = (
         Get-FileHash -Algorithm SHA256 -LiteralPath $installedCodexExecutable
     ).Hash
     if ($installedCodexHash -ne $CodexExecutableSha256) {
         throw "The installed Codex executable failed post-copy verification."
+    }
+    $installedCodexCodeModeHostHash = (
+        Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $installedCodexCodeModeHost
+    ).Hash
+    if (
+        $installedCodexCodeModeHostHash -ne
+        $CodexCodeModeHostExecutableSha256
+    ) {
+        throw (
+            "The installed Codex code-mode host failed post-copy verification."
+        )
     }
 
     $template = Get-Content -Raw -LiteralPath $serviceTemplate
@@ -266,6 +309,10 @@ if ($PSCmdlet.ShouldProcess(
         "__PROJECT_REGISTRY_PATH__" = $ProjectRegistryPath
         "__CODEX_EXECUTABLE__" = $installedCodexExecutable
         "__CODEX_EXECUTABLE_SHA256__" = $CodexExecutableSha256
+        "__CODEX_CODE_MODE_HOST_EXECUTABLE__" = $installedCodexCodeModeHost
+        "__CODEX_CODE_MODE_HOST_SHA256__" = (
+            $CodexCodeModeHostExecutableSha256
+        )
         "__CODEX_HOME__" = $codexHome
         "__TRUSTED_PATH__" = (
             (Split-Path -Parent $NodeExecutable) + ";" +
@@ -319,6 +366,10 @@ if ($PSCmdlet.ShouldProcess(
     Add-FileSystemAccessRule -Path $serviceDirectory `
         -Identity $serviceIdentity -Rights ReadAndExecute
     Add-FileSystemAccessRule -Path $binaryDirectory `
+        -Identity $serviceIdentity -Rights ReadAndExecute
+    Add-FileSystemAccessRule -Path $installedCodexExecutable `
+        -Identity $serviceIdentity -Rights ReadAndExecute
+    Add-FileSystemAccessRule -Path $installedCodexCodeModeHost `
         -Identity $serviceIdentity -Rights ReadAndExecute
     foreach ($path in @($NodeExecutable, $GitExecutable)) {
         Add-FileSystemAccessRule -Path $path `

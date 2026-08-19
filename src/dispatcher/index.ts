@@ -60,6 +60,8 @@ try {
     config.codexExecutable,
     config.codexHome,
     config.codexExecutableSha256,
+    config.codexCodeModeHostExecutable,
+    config.codexCodeModeHostSha256,
     config.trustedPath,
   );
   const dispatcher: ForegroundDispatcher =

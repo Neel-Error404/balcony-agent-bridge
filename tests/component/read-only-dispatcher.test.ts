@@ -235,6 +235,8 @@ function dispatcherConfig(
     projectsPath,
     codexExecutable: "unused-in-component-test",
     codexExecutableSha256: "a".repeat(64),
+    codexCodeModeHostExecutable: "unused-in-component-test",
+    codexCodeModeHostSha256: "b".repeat(64),
     codexHome: "unused-in-component-test",
     trustedPath: "unused-in-component-test",
     pollIntervalMs: 1000,

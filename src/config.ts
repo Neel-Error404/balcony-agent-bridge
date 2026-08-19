@@ -59,6 +59,11 @@ const DispatcherEnvironmentSchema = z
       .string()
       .trim()
       .regex(/^[a-f0-9]{64}$/i),
+    BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE: z.string().trim().min(1),
+    BALCONY_CODEX_CODE_MODE_HOST_SHA256: z
+      .string()
+      .trim()
+      .regex(/^[a-f0-9]{64}$/i),
     BALCONY_DISPATCHER_CODEX_HOME: z.string().trim().min(1),
     BALCONY_DISPATCHER_TRUSTED_PATH: z.string().trim().min(1),
     BALCONY_DISPATCHER_POLL_INTERVAL_MS: z.coerce
@@ -125,6 +130,8 @@ export interface ReadOnlyDispatcherConfig {
   projectsPath: string;
   codexExecutable: string;
   codexExecutableSha256: string;
+  codexCodeModeHostExecutable: string;
+  codexCodeModeHostSha256: string;
   codexHome: string;
   trustedPath: string;
   pollIntervalMs: number;
@@ -228,6 +235,11 @@ export function loadReadOnlyDispatcherConfig(
     codexExecutable: path.resolve(result.data.BALCONY_CODEX_EXECUTABLE),
     codexExecutableSha256:
       result.data.BALCONY_CODEX_EXECUTABLE_SHA256.toLowerCase(),
+    codexCodeModeHostExecutable: path.resolve(
+      result.data.BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE,
+    ),
+    codexCodeModeHostSha256:
+      result.data.BALCONY_CODEX_CODE_MODE_HOST_SHA256.toLowerCase(),
     codexHome: path.resolve(result.data.BALCONY_DISPATCHER_CODEX_HOME),
     trustedPath: result.data.BALCONY_DISPATCHER_TRUSTED_PATH,
     pollIntervalMs: result.data.BALCONY_DISPATCHER_POLL_INTERVAL_MS,

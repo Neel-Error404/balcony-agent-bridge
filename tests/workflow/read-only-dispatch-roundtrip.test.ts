@@ -275,6 +275,8 @@ function dispatcherConfig(
     projectsPath,
     codexExecutable: "unused-in-workflow-test",
     codexExecutableSha256: "a".repeat(64),
+    codexCodeModeHostExecutable: "unused-in-workflow-test",
+    codexCodeModeHostSha256: "b".repeat(64),
     codexHome: "unused-in-workflow-test",
     trustedPath: "unused-in-workflow-test",
     pollIntervalMs: 1000,

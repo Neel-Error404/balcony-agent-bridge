@@ -61,6 +61,29 @@ describe("dispatcher Windows service installation contract", () => {
     expect(installer).toContain(
       "The installed Codex executable failed post-copy verification",
     );
+    expect(installer).toContain("[string] $CodexCodeModeHostExecutable");
+    expect(installer).toContain("[string] $CodexCodeModeHostExecutableSha256");
+    expect(installer).toContain(
+      "The installed Codex code-mode host failed post-copy verification",
+    );
+    expect(installer).toContain(
+      'Join-Path $binaryDirectory "codex-code-mode-host.exe"',
+    );
+    expect(template).toContain("BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE");
+    expect(template).toContain("BALCONY_CODEX_CODE_MODE_HOST_SHA256");
+  });
+
+  it("grants the service SID execute access to the complete Codex bundle", () => {
+    expect(installer).toContain(
+      "Codex and its code-mode host must come from the same package directory",
+    );
+    expect(installer).toContain(
+      "Add-FileSystemAccessRule -Path $installedCodexExecutable",
+    );
+    expect(installer).toContain(
+      "Add-FileSystemAccessRule -Path $installedCodexCodeModeHost",
+    );
+    expect(installer).toContain("-Rights ReadAndExecute");
   });
 
   it("keeps Azure credentials out of the dispatcher process", () => {

@@ -14,6 +14,7 @@ describe("LocalCodexExecutor process boundary", () => {
   let temporaryDirectory: string;
   let projectDirectory: string;
   let codexHome: string;
+  let codeModeHost: string;
 
   beforeEach(() => {
     temporaryDirectory = fs.mkdtempSync(
@@ -23,6 +24,11 @@ describe("LocalCodexExecutor process boundary", () => {
     codexHome = path.join(temporaryDirectory, "codex-home");
     fs.mkdirSync(projectDirectory);
     fs.mkdirSync(codexHome);
+    codeModeHost = path.join(
+      temporaryDirectory,
+      "codex-code-mode-host.exe",
+    );
+    fs.writeFileSync(codeModeHost, "pinned code mode host", "utf8");
   });
 
   afterEach(() => {
@@ -49,6 +55,8 @@ describe("LocalCodexExecutor process boundary", () => {
       executable,
       codexHome,
       fileHash(executable),
+      codeModeHost,
+      fileHash(codeModeHost),
       trustedPath(),
       {
         ...process.env,
@@ -114,6 +122,8 @@ describe("LocalCodexExecutor process boundary", () => {
       executable,
       codexHome,
       fileHash(executable),
+      codeModeHost,
+      fileHash(codeModeHost),
       trustedPath(),
       process.env,
     );
@@ -161,6 +171,8 @@ describe("LocalCodexExecutor process boundary", () => {
       executable,
       codexHome,
       fileHash(executable),
+      codeModeHost,
+      fileHash(codeModeHost),
       trustedPath(),
       process.env,
     );
@@ -206,6 +218,8 @@ describe("LocalCodexExecutor process boundary", () => {
       executable,
       codexHome,
       fileHash(executable),
+      codeModeHost,
+      fileHash(codeModeHost),
       trustedPath(),
       process.env,
     );
@@ -240,6 +254,8 @@ describe("LocalCodexExecutor process boundary", () => {
       executable,
       codexHome,
       fileHash(executable),
+      codeModeHost,
+      fileHash(codeModeHost),
       trustedPath(),
       process.env,
     );
@@ -292,10 +308,77 @@ describe("LocalCodexExecutor process boundary", () => {
           executable,
           codexHome,
           "0".repeat(64),
+          codeModeHost,
+          fileHash(codeModeHost),
           trustedPath(),
           process.env,
         ),
     ).toThrow(/approved SHA-256/);
+  });
+
+  it("rejects a missing Codex code-mode host", () => {
+    const executable = writePowerShellFixture(
+      temporaryDirectory,
+      "missing-companion.ps1",
+      ["Write-Output 'should not run'"],
+    );
+
+    expect(
+      () =>
+        new LocalCodexExecutor(
+          executable,
+          codexHome,
+          fileHash(executable),
+          path.join(temporaryDirectory, "missing-host.exe"),
+          "0".repeat(64),
+          trustedPath(),
+          process.env,
+        ),
+    ).toThrow(/Codex code-mode host.*accessible file/);
+  });
+
+  it("rejects a Codex code-mode host with the wrong approved hash", () => {
+    const executable = writePowerShellFixture(
+      temporaryDirectory,
+      "companion-hash.ps1",
+      ["Write-Output 'should not run'"],
+    );
+
+    expect(
+      () =>
+        new LocalCodexExecutor(
+          executable,
+          codexHome,
+          fileHash(executable),
+          codeModeHost,
+          "0".repeat(64),
+          trustedPath(),
+          process.env,
+        ),
+    ).toThrow(/code-mode host.*approved SHA-256/);
+  });
+
+  it("requires the Codex executable and companion to be sibling files", () => {
+    const nested = path.join(temporaryDirectory, "nested");
+    fs.mkdirSync(nested);
+    const executable = writePowerShellFixture(
+      nested,
+      "sibling-boundary.ps1",
+      ["Write-Output 'should not run'"],
+    );
+
+    expect(
+      () =>
+        new LocalCodexExecutor(
+          executable,
+          codexHome,
+          fileHash(executable),
+          codeModeHost,
+          fileHash(codeModeHost),
+          trustedPath(),
+          process.env,
+        ),
+    ).toThrow(/same directory/);
   });
 });
 

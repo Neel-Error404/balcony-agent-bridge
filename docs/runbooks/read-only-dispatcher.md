@@ -15,8 +15,10 @@ Codex application.
 - The local Codex CLI supports `exec`, `--ephemeral`,
   `--ignore-user-config`, `--sandbox read-only`, and approval policy `never`.
 - A dedicated `CODEX_HOME` is available for dispatcher authentication.
-- The approved Codex wrapper SHA-256 and a trusted Node executable directory
-  are known.
+- The approved `codex.exe` and sibling `codex-code-mode-host.exe` SHA-256
+  values and a trusted Node executable directory are known. Treat these two
+  Codex files as one version-pinned bundle; a main executable without its
+  companion is not an acceptable dispatcher runtime.
 - The project registry is stored outside Git with access limited to the
   dispatcher operator.
 
@@ -41,6 +43,8 @@ BALCONY_BRIDGE_DB_PATH
 BALCONY_DISPATCHER_PROJECTS_PATH
 BALCONY_CODEX_EXECUTABLE
 BALCONY_CODEX_EXECUTABLE_SHA256
+BALCONY_CODEX_CODE_MODE_HOST_EXECUTABLE
+BALCONY_CODEX_CODE_MODE_HOST_SHA256
 BALCONY_DISPATCHER_CODEX_HOME
 BALCONY_DISPATCHER_TRUSTED_PATH
 BALCONY_DISPATCHER_POLL_INTERVAL_MS
@@ -59,6 +63,10 @@ string, or Git credential variables to the dispatcher child.
 The trusted PATH should contain only the approved Node executable directory
 and any operating-system directories required by the pinned Codex wrapper.
 Recalculate and reapprove the wrapper SHA-256 after every Codex CLI update.
+Recalculate and reapprove the code-mode host SHA-256 at the same time. The
+dispatcher fails closed at process startup if either file is absent, has the
+wrong hash, uses the wrong companion filename, or is not installed beside the
+main Codex executable.
 
 ## Foreground Acceptance
 
@@ -160,6 +168,27 @@ consultation mode only for pinned-Git consultation requests. One service runs
 one mode; do not install competing copies casually. Add further projects one
 at a time only after their own privacy review, exact revision pin, and
 acceptance evidence.
+
+A request enters that consultation route only when its dispatch object also
+declares `evidence_mode=pinned_git`. Service mode and request admission are
+independent: a consultation service does not reinterpret marker-free legacy
+requests, and a pinned request must not be claimed by the legacy dispatcher.
+
+For an existing service, do not rerun the initial installer and do not remove
+the service merely to change modes. After a separately approved exact release
+is available, run `scripts/Update-DispatcherService.ps1 -WhatIf` with both
+Codex source files and hashes, the pinned Git executable and hash, the
+machine-local registry, and `-DispatcherMode consultation`. The upgrade script
+preserves the dedicated `CODEX_HOME`, registry, database, service identity,
+and existing startup selection. It backs up the service XML and installed
+Codex bundle before stopping only `BalconyAgentDispatcher`, verifies one
+service-owned child after restart, and restores the previous files and running
+state if acceptance fails.
+
+The installer or upgrade copies the two Codex executables into the same
+restricted ProgramData `bin` directory, verifies both after copying, and
+grants `NT SERVICE\BalconyAgentDispatcher` `ReadAndExecute`. Never point the
+service at a normal user's package cache or copy that cache's ACLs.
 
 Set the mandatory `NotBeforeUtc` installation cutoff after the newest obsolete
 request and at or before the first explicitly accepted activation probe. The

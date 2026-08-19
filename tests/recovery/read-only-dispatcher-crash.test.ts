@@ -364,6 +364,8 @@ function dispatcherConfig(
     projectsPath,
     codexExecutable: "unused-in-recovery-test",
     codexExecutableSha256: "a".repeat(64),
+    codexCodeModeHostExecutable: "unused-in-recovery-test",
+    codexCodeModeHostSha256: "b".repeat(64),
     codexHome: "unused-in-recovery-test",
     trustedPath: "unused-in-recovery-test",
     pollIntervalMs: 1000,

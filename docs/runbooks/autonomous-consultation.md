@@ -3,13 +3,14 @@
 ## Current Boundary
 
 The candidate contains the evidence provider, durable coordinator, status
-fields, recovery controls, and an explicit consultation mode in the foreground
-dispatcher entrypoint. It has no approved production release.
+fields, recovery controls, an explicit consultation mode, a pinned two-file
+Codex bundle contract, and a reversible existing-service upgrade script. It
+has no approved production release.
 
 Do not install it, replace the running bridge, edit the machine allowlist,
-create a service or scheduled task, or change Azure configuration. The
-consultation coordinator is foreground-only for the later acceptance phase,
-and automatic startup remains disabled.
+create a service or scheduled task, or change Azure configuration. Source
+verification does not authorize `Update-DispatcherService.ps1`, a service
+restart, MCP reconfiguration, or automatic startup.
 
 ## Pinned Git Preconditions
 
@@ -92,10 +93,11 @@ manually, or resend a nested request with a new idempotency key.
 
 ## Foreground Acceptance Gate
 
-Before foreground consultation acceptance, set process-local configuration
-for consultation mode, a neutral working directory, and independently hashed
-Codex and Git executables. Use registry schema `1.2`; each enabled project must
-bind `pinned_git` to one full approved revision.
+Before consultation acceptance, set process-local configuration for
+consultation mode, a neutral working directory, independently hashed Git, and
+the complete sibling Codex bundle: `codex.exe` plus
+`codex-code-mode-host.exe`. Use registry schema `1.2`; each enabled project
+must bind `pinned_git` to one full approved revision.
 
 Evidence-only Codex turns must retain all of these controls:
 
@@ -122,8 +124,39 @@ Acceptance requires:
 10. Confirmation that automatic startup remains disabled.
 
 New consultation requests must declare `evidence_mode=pinned_git`. Requests
-without that marker remain on the legacy path; the two claimers must not
-compete for one inbox row.
+without that marker remain on the legacy claim route; the two claimers must
+not compete for one inbox row. Selecting consultation mode on the receiving
+service and including the request marker are separate required gates.
+
+## MCP Admission And Reload
+
+The interactive Codex MCP process creates the envelope; the Windows bridge
+service only transports it. Confirm the machine-local MCP registration points
+to the exact approved release whose `agent_bridge_ask_agent` input schema
+contains optional `evidence_mode: pinned_git`. After changing the MCP release
+path, restart the Codex application or task so the stdio server and its tool
+definition are reloaded. Existing MCP child processes do not hot-reload source
+or compiled output.
+
+Before a live nested test:
+
+1. Inspect the loaded MCP tool schema and confirm `evidence_mode` is present.
+2. Send a new request with `evidence_mode=pinned_git`; do not reuse a legacy
+   request or dead-lettered message.
+3. Confirm the destination inbox persisted that marker and the consultation
+   coordinator, rather than `ReadOnlyDispatcher`, claimed the row.
+4. Confirm a durable consultation run exists before expecting a nested peer
+   request.
+
+Do not infer consultation from a successful Codex answer. A legacy child can
+exit successfully with explanatory text while creating no consultation run.
+
+For an already installed service, the later approved operator procedure is:
+run `scripts/Update-DispatcherService.ps1 -WhatIf`, review its exact paths and
+hashes, run the upgrade with `-DispatcherMode consultation`, verify the
+service-owned child and consultation heartbeat, then reload the MCP client.
+The script must receive the approved `codex.exe` and sibling
+`codex-code-mode-host.exe`; it does not discover or trust a user-profile copy.
 
 Broker send acknowledgement alone is insufficient. Record canonical inbox,
 coordinator state, child result, outbox, peer inbox, and caller-visible result

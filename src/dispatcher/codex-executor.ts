@@ -31,12 +31,49 @@ export class LocalCodexExecutor implements CodexExecutor {
     executable: string,
     codexHome: string,
     expectedExecutableSha256: string,
+    codeModeHostExecutable: string,
+    expectedCodeModeHostSha256: string,
     private readonly trustedPath: string,
     private readonly sourceEnvironment: NodeJS.ProcessEnv = process.env,
   ) {
     this.executable = requireFile(executable, "Codex executable");
+    const codeModeHost = requireFile(
+      codeModeHostExecutable,
+      "Codex code-mode host",
+    );
+    if (
+      path.basename(codeModeHost).toLowerCase() !==
+      "codex-code-mode-host.exe"
+    ) {
+      throw new DispatchConfigurationError(
+        "The Codex code-mode host must use the expected companion filename.",
+      );
+    }
+    const executableDirectory = path.dirname(
+      fs.realpathSync.native(this.executable),
+    );
+    const codeModeHostDirectory = path.dirname(
+      fs.realpathSync.native(codeModeHost),
+    );
+    if (
+      executableDirectory.toLowerCase() !==
+      codeModeHostDirectory.toLowerCase()
+    ) {
+      throw new DispatchConfigurationError(
+        "The Codex executable and code-mode host must be in the same directory.",
+      );
+    }
     this.codexHome = requireDirectory(codexHome, "dispatcher CODEX_HOME");
-    verifyFileHash(this.executable, expectedExecutableSha256);
+    verifyFileHash(
+      this.executable,
+      expectedExecutableSha256,
+      "Codex executable",
+    );
+    verifyFileHash(
+      codeModeHost,
+      expectedCodeModeHostSha256,
+      "Codex code-mode host",
+    );
   }
 
   public async execute(
@@ -320,11 +357,12 @@ export function createChildEnvironment(
 function verifyFileHash(
   file: string,
   expectedSha256: string,
+  label: string,
 ): void {
   const normalizedExpected = expectedSha256.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/u.test(normalizedExpected)) {
     throw new DispatchConfigurationError(
-      "The configured Codex executable SHA-256 is invalid.",
+      `The configured ${label} SHA-256 is invalid.`,
     );
   }
   const actual = createHash("sha256")
@@ -332,7 +370,7 @@ function verifyFileHash(
     .digest("hex");
   if (actual !== normalizedExpected) {
     throw new DispatchConfigurationError(
-      "The configured Codex executable did not match its approved SHA-256.",
+      `The configured ${label} did not match its approved SHA-256.`,
     );
   }
 }

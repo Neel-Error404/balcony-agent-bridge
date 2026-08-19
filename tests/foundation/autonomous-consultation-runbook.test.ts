@@ -31,6 +31,37 @@ describe("autonomous consultation operating documentation", () => {
     expect(runbook).toContain("Do not");
   });
 
+  it("documents the Codex bundle, consultation admission, and MCP reload gates", () => {
+    const consultation = fs.readFileSync(
+      path.join(
+        repositoryRoot,
+        "docs",
+        "runbooks",
+        "autonomous-consultation.md",
+      ),
+      "utf8",
+    );
+    const dispatcher = fs.readFileSync(
+      path.join(
+        repositoryRoot,
+        "docs",
+        "runbooks",
+        "read-only-dispatcher.md",
+      ),
+      "utf8",
+    );
+
+    for (const document of [consultation, dispatcher]) {
+      expect(document).toContain("codex-code-mode-host.exe");
+      expect(document).toContain("Update-DispatcherService.ps1");
+      expect(document).toContain("evidence_mode");
+      expect(document).toContain("consultation");
+    }
+    expect(consultation).toContain("restart the Codex application or task");
+    expect(consultation).toContain("loaded MCP tool schema");
+    expect(consultation).toContain("legacy claim route");
+  });
+
   it("records Phase 3 without claiming deployment", () => {
     const decision = fs.readFileSync(
       path.join(
