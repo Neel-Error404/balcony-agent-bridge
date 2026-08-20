@@ -16,7 +16,16 @@ original `185/185` ladder but reproduced two P1 defects during a live
 
 Candidate branch: `codex/sys-a-batch5-codex-bundle`
 
-Candidate parent: `1bf89d44857f1341d9e94288eb4aaba4abd0d96a`
+Original P1-fix candidate: `a3681439a28b4110e612ed190f516a7d5a2da331`
+
+Current portability-follow-up parent:
+`a3681439a28b4110e612ed190f516a7d5a2da331`
+
+SYS-B then returned durable re-verification message
+`ffcbb19e-edcb-499f-a18d-41a4baa6b8dd`. Foundation and Component passed, but
+Integration stopped at `22/23` because the test compared equivalent Windows
+8.3 and long-path strings directly. The production migration module had
+intentionally stored the long canonical path and required no source change.
 
 ## Corrections
 
@@ -43,6 +52,9 @@ Candidate parent: `1bf89d44857f1341d9e94288eb4aaba4abd0d96a`
 - Current-pin mismatch rejection: passed.
 - `-WhatIf` registry non-mutation: passed.
 - Exact-byte registry rollback, including an original UTF-8 BOM: passed.
+- Windows 8.3 and long-path filesystem identity comparison: first reproduced
+  as `C:\PROGRA~1` versus `C:\Program Files`, then passed using
+  `fs.realpathSync.native` with case-insensitive Windows normalization.
 
 ## Verification
 
@@ -50,11 +62,11 @@ Candidate parent: `1bf89d44857f1341d9e94288eb4aaba4abd0d96a`
 |---|---:|
 | Foundation | 54/54 |
 | Component | 67/67 |
-| Integration | 23/23 |
+| Integration | 24/24 |
 | Workflow | 3/3 |
 | Recovery | 12/12 |
 | Security | 33/33 |
-| **Total** | **192/192** |
+| **Total** | **193/193** |
 
 Additional verification:
 
@@ -64,6 +76,8 @@ Additional verification:
 - Production audit: zero reported vulnerabilities.
 - Focused regression suite: 16/16 passed after first reproducing all requested
   seams as failures.
+- The dedicated 8.3-versus-long-path regression failed before the assertion
+  fix and passed afterward; the production migration module remained unchanged.
 
 ## Runtime Boundary
 
@@ -73,9 +87,8 @@ authentication state was changed. This is a source candidate only.
 
 ## Remaining Gates
 
-1. Publish the candidate branch and record its exact remote SHA.
-2. Have SYS-B run the complete current `192/192` ladder and a live
+1. Have SYS-B run the complete current `193/193` ladder and a live
    cross-volume `-WhatIf` against its unchanged deployed registry.
-3. Reconcile an owner-approved exact release on `main` only after SYS-B returns
+2. Reconcile an owner-approved exact release on `main` only after SYS-B returns
    `READY_FOR_MAIN_RECONCILIATION`.
-4. Upgrade SYS-A and SYS-B one at a time under separate deployment approvals.
+3. Upgrade SYS-A and SYS-B one at a time under separate deployment approvals.

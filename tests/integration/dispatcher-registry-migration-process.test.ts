@@ -106,10 +106,25 @@ describe("dispatcher registry migration process", () => {
       fs.readFileSync(fixture.registryPath, "utf8"),
     ) as typeof registry;
 
-    expect(migrated.projects[0]?.path).toBe(fixture.desiredRoot);
+    expect(canonicalWindowsFilesystemIdentity(
+      migrated.projects[0]?.path ?? "",
+    )).toBe(canonicalWindowsFilesystemIdentity(fixture.desiredRoot));
     expect(migrated.projects[0]?.evidence.revision).toBe(desiredRevision);
     expect(migrated.projects[1]).toEqual(registry.projects[1]);
     expect(migrated.metadata).toEqual(registry.metadata);
+  });
+
+  it("treats Windows 8.3 and long paths as the same filesystem identity", () => {
+    const shortAlias = "C:\\PROGRA~1";
+    expect(fs.existsSync(shortAlias)).toBe(true);
+    const longPath = fs.realpathSync.native(shortAlias);
+    expect(path.win32.normalize(shortAlias).toLowerCase()).not.toBe(
+      path.win32.normalize(longPath).toLowerCase(),
+    );
+
+    expect(canonicalWindowsFilesystemIdentity(shortAlias)).toBe(
+      canonicalWindowsFilesystemIdentity(longPath),
+    );
   });
 
   it("rejects a registry pin that does not match the current checkout", () => {
@@ -220,4 +235,10 @@ function runPowerShell(
 
 function powerShellLiteral(value: string): string {
   return value.replaceAll("'", "''");
+}
+
+function canonicalWindowsFilesystemIdentity(value: string): string {
+  return path.win32
+    .normalize(fs.realpathSync.native(value))
+    .toLowerCase();
 }
