@@ -173,6 +173,69 @@ describe("PinnedGitEvidenceProvider", () => {
     ).toThrow(/approved SHA-256/);
   });
 
+  it("uses only exact command-scoped trust when Git observes a different repository owner", () => {
+    const repository = createRepository();
+    const revision = git(repository, ["rev-parse", "HEAD"]);
+    const isolatedConfigDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-git-config-"),
+    );
+    directories.push(isolatedConfigDirectory);
+    const isolatedGlobalConfig = path.join(
+      isolatedConfigDirectory,
+      "gitconfig",
+    );
+    fs.writeFileSync(isolatedGlobalConfig, "");
+    const priorEnvironment = new Map(
+      [
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_TEST_ASSUME_DIFFERENT_OWNER",
+      ].map((key) => [key, process.env[key]]),
+    );
+
+    process.env["GIT_CONFIG_GLOBAL"] = isolatedGlobalConfig;
+    process.env["GIT_CONFIG_NOSYSTEM"] = "1";
+    process.env["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1";
+    try {
+      const untrusted = spawnSync(
+        findGitExecutable(),
+        ["-C", repository, "rev-parse", "--show-toplevel"],
+        {
+          encoding: "utf8",
+          shell: false,
+          windowsHide: true,
+        },
+      );
+      expect(untrusted.status).not.toBe(0);
+      expect(untrusted.stderr).toMatch(/dubious ownership/iu);
+
+      const evidence = pinnedProvider().collect({
+        project: "bridge",
+        projectRoot: repository,
+        revision,
+        paths: ["README.md"],
+      });
+
+      expect(evidence.items).toMatchObject([
+        {
+          path: "README.md",
+          source: "pinned_git",
+          git_commit: revision,
+          content: "Committed bridge docs.\n",
+        },
+      ]);
+      expect(fs.readFileSync(isolatedGlobalConfig, "utf8")).toBe("");
+    } finally {
+      for (const [key, value] of priorEnvironment) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   function createRepository(): string {
     const repository = fs.mkdtempSync(
       path.join(os.tmpdir(), "balcony-pinned-git-"),

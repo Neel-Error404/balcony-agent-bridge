@@ -356,13 +356,17 @@ function gitOptionalText(
   root: string,
   arguments_: string[],
 ): string | null {
-  const result = spawnSync(executable, ["-C", root, ...arguments_], {
-    encoding: "buffer",
-    maxBuffer: 1_048_576,
-    timeout: GIT_COMMAND_TIMEOUT_MS,
-    shell: false,
-    windowsHide: true,
-  });
+  const result = spawnSync(
+    executable,
+    gitArgumentsForCanonicalRoot(root, arguments_),
+    {
+      encoding: "buffer",
+      maxBuffer: 1_048_576,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      shell: false,
+      windowsHide: true,
+    },
+  );
   if (result.status === 1) {
     return null;
   }
@@ -382,13 +386,17 @@ function gitBuffer(
   operation: string,
   maxBuffer: number,
 ): Buffer {
-  const result = spawnSync(executable, ["-C", root, ...arguments_], {
-    encoding: "buffer",
-    maxBuffer,
-    timeout: GIT_COMMAND_TIMEOUT_MS,
-    shell: false,
-    windowsHide: true,
-  });
+  const result = spawnSync(
+    executable,
+    gitArgumentsForCanonicalRoot(root, arguments_),
+    {
+      encoding: "buffer",
+      maxBuffer,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      shell: false,
+      windowsHide: true,
+    },
+  );
   if (result.status !== 0 || result.error) {
     throw new EvidencePolicyError(
       `Git could not read ${operation}.`,
@@ -396,6 +404,25 @@ function gitBuffer(
     );
   }
   return result.stdout;
+}
+
+function gitArgumentsForCanonicalRoot(
+  root: string,
+  arguments_: string[],
+): string[] {
+  const normalized = root.replaceAll("\\", "/");
+  if (normalized === "*" || normalized.endsWith("/*")) {
+    throw new EvidencePolicyError(
+      "The canonical Git evidence root cannot use safe-directory wildcard syntax.",
+    );
+  }
+  return [
+    "-c",
+    `safe.directory=${root}`,
+    "-C",
+    root,
+    ...arguments_,
+  ];
 }
 
 function resolveGitExecutable(
