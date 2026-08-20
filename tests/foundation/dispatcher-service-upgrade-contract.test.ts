@@ -36,6 +36,13 @@ describe("dispatcher existing-service upgrade contract", () => {
     expect(script).not.toContain("Uninstall");
   });
 
+  it("validates current registry state separately from the desired release", () => {
+    expect(script).toContain("Get-DispatcherRegistryMigrationJson");
+    expect(script).toContain("$currentBridgeRepositoryRoot");
+    expect(script).toContain("$currentBridgeRevision");
+    expect(script).toContain("$desiredRegistryJson");
+  });
+
   it("makes consultation mode and the new release explicit", () => {
     expect(script).toContain('[ValidateSet("consultation")]');
     expect(script).toContain('"__DISPATCHER_MODE__" = $DispatcherMode');

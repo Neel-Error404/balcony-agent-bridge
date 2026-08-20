@@ -179,11 +179,15 @@ the service merely to change modes. After a separately approved exact release
 is available, run `scripts/Update-DispatcherService.ps1 -WhatIf` with both
 Codex source files and hashes, the pinned Git executable and hash, the
 machine-local registry, and `-DispatcherMode consultation`. The upgrade script
-preserves the dedicated `CODEX_HOME`, registry, database, service identity,
-and existing startup selection. It backs up the service XML and installed
-Codex bundle before stopping only `BalconyAgentDispatcher`, verifies one
-service-owned child after restart, and restores the previous files and running
-state if acceptance fails.
+validates the registry's currently deployed bridge path and revision, computes
+the desired candidate pin in memory, and does not require or perform a
+premature registry edit during `-WhatIf`. A real upgrade preserves the
+dedicated `CODEX_HOME`, database, service identity, existing startup selection,
+and every unrelated registry entry. It backs up the registry, service XML, and
+installed Codex bundle before stopping only `BalconyAgentDispatcher`,
+atomically migrates only the `balcony-agent-bridge` path and revision, verifies
+one service-owned child after restart, and restores the exact original registry
+and previous runtime state if acceptance fails.
 
 The installer or upgrade copies the two Codex executables into the same
 restricted ProgramData `bin` directory, verifies both after copying, and

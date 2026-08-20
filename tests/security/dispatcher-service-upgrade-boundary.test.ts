@@ -40,4 +40,10 @@ describe("dispatcher service upgrade security boundary", () => {
     expect(script).toContain("$backupDirectory");
     expect(script).toContain("$InstallRoot");
   });
+
+  it("loads the atomic registry migration boundary from the approved release", () => {
+    expect(script).toContain("DispatcherRegistryMigration.psm1");
+    expect(script).toContain("Import-Module -Force -Name $registryMigrationModule");
+    expect(script).toContain("Set-DispatcherProjectRegistry");
+  });
 });

@@ -69,6 +69,10 @@ $ErrorActionPreference = "Stop"
 $serviceName = "BalconyAgentDispatcher"
 $serviceAccount = "NT AUTHORITY\LocalService"
 $serviceSidAccount = "NT SERVICE\$serviceName"
+$registryMigrationModule = Join-Path (
+    $PSScriptRoot
+) "DispatcherRegistryMigration.psm1"
+Import-Module -Force -Name $registryMigrationModule
 
 function Assert-ContainedPath {
     param(
@@ -229,17 +233,14 @@ if ($worktreeStatus) {
     throw "The dispatcher release worktree must be clean."
 }
 
-$registryRelativePath = [IO.Path]::GetRelativePath(
-    $RepositoryRoot,
-    $ProjectRegistryPath
-)
-if (
-    $registryRelativePath -ne ".." -and
-    -not $registryRelativePath.StartsWith("..\")
+if (Test-CanonicalPathContained `
+    -Parent $RepositoryRoot `
+    -Child $ProjectRegistryPath
 ) {
     throw "The machine-local project registry must remain outside Git."
 }
-$registry = Get-Content -Raw -LiteralPath $ProjectRegistryPath | ConvertFrom-Json
+$currentRegistryJson = Get-Content -Raw -LiteralPath $ProjectRegistryPath
+$registry = $currentRegistryJson | ConvertFrom-Json
 if ($registry.schema_version -ne "1.2") {
     throw "The dispatcher project registry must use schema_version 1.2."
 }
@@ -267,13 +268,33 @@ $bridgeProject = @(
 if ($bridgeProject.Count -ne 1) {
     throw "The upgrade requires exactly one balcony-agent-bridge project entry."
 }
+$currentBridgeRepositoryRoot = (
+    Resolve-Path -LiteralPath $bridgeProject[0].path
+).Path
+$currentBridgeRevision = (
+    & $GitExecutable -C $currentBridgeRepositoryRoot rev-parse HEAD
+).Trim()
 if (
-    (Resolve-Path -LiteralPath $bridgeProject[0].path).Path -ne
-        $RepositoryRoot -or
-    $bridgeProject[0].evidence.revision -ne $ApprovedRevision
+    $LASTEXITCODE -ne 0 -or
+    $currentBridgeRevision -notmatch "^[a-f0-9]{40}$"
 ) {
-    throw "The bridge project must pin the approved release checkout and revision."
+    throw "Git could not resolve the currently deployed bridge revision."
 }
+$currentBridgeWorktreeStatus = (
+    & $GitExecutable -C $currentBridgeRepositoryRoot status --porcelain
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Git could not verify the currently deployed bridge checkout."
+}
+if ($currentBridgeWorktreeStatus) {
+    throw "The currently deployed bridge checkout must be clean."
+}
+$desiredRegistryJson = Get-DispatcherRegistryMigrationJson `
+    -RegistryJson $currentRegistryJson `
+    -CurrentRepositoryRoot $currentBridgeRepositoryRoot `
+    -CurrentRevision $currentBridgeRevision `
+    -DesiredRepositoryRoot $RepositoryRoot `
+    -DesiredRevision $ApprovedRevision
 
 $template = Get-Content -Raw -LiteralPath $serviceTemplate
 $replacements = @{
@@ -319,6 +340,7 @@ $backupCodexExecutable = Join-Path $backupDirectory "codex.exe"
 $backupCodexCodeModeHost = Join-Path (
     $backupDirectory
 ) "codex-code-mode-host.exe"
+$backupProjectRegistry = Join-Path $backupDirectory "projects.json"
 $hadCodeModeHost = Test-Path -LiteralPath (
     $installedCodexCodeModeHost
 ) -PathType Leaf
@@ -340,6 +362,9 @@ function Restore-PreviousDispatcherState {
     elseif (Test-Path -LiteralPath $installedCodexCodeModeHost -PathType Leaf) {
         Remove-Item -LiteralPath $installedCodexCodeModeHost -Force
     }
+    Restore-DispatcherProjectRegistry `
+        -Path $ProjectRegistryPath `
+        -BackupPath $backupProjectRegistry
     if ($wasRunning) {
         Start-Service -Name $serviceName
     }
@@ -358,6 +383,9 @@ if ($PSCmdlet.ShouldProcess(
         Copy-Item -LiteralPath $installedCodexCodeModeHost `
             -Destination $backupCodexCodeModeHost
     }
+    Backup-DispatcherProjectRegistry `
+        -Path $ProjectRegistryPath `
+        -BackupPath $backupProjectRegistry
 
     try {
         Stop-Service -Name $serviceName -Force
@@ -373,6 +401,10 @@ if ($PSCmdlet.ShouldProcess(
             -Label "Installed Codex code-mode host"
         Set-Content -LiteralPath $serviceConfiguration `
             -Value $template -Encoding UTF8
+        Set-DispatcherProjectRegistry `
+            -Path $ProjectRegistryPath `
+            -Content $desiredRegistryJson `
+            -Confirm:$false
 
         $serviceIdentity = New-Object Security.Principal.NTAccount(
             $serviceSidAccount
@@ -422,7 +454,8 @@ if ($PSCmdlet.ShouldProcess(
         Remove-Item -LiteralPath $backupDirectory -Recurse -Force
         Write-Output (
             "Upgraded $serviceName to consultation mode at revision " +
-            "$ApprovedRevision. Dedicated CODEX_HOME and project registry were preserved."
+            "$ApprovedRevision. Dedicated CODEX_HOME was preserved and the " +
+            "bridge registry pin was atomically migrated."
         )
     }
     catch {

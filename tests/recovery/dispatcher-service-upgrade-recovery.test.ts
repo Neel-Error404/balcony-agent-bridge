@@ -22,11 +22,13 @@ describe("dispatcher service upgrade recovery", () => {
     );
     expect(script).toContain("$backupCodexExecutable");
     expect(script).toContain("$backupCodexCodeModeHost");
+    expect(script).toContain("$backupProjectRegistry");
   });
 
   it("restores configuration and binaries before restarting after failure", () => {
     expect(script).toContain("catch {");
     expect(script).toContain("Restore-PreviousDispatcherState");
+    expect(script).toContain("Restore-DispatcherProjectRegistry");
     expect(script).toContain("The previous dispatcher state was restored");
   });
 

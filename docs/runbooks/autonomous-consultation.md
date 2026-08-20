@@ -157,6 +157,10 @@ hashes, run the upgrade with `-DispatcherMode consultation`, verify the
 service-owned child and consultation heartbeat, then reload the MCP client.
 The script must receive the approved `codex.exe` and sibling
 `codex-code-mode-host.exe`; it does not discover or trust a user-profile copy.
+The preflight validates the currently registered bridge checkout and computes
+the desired release pin without mutating the registry. The real transaction
+backs up the registry, atomically changes only the bridge path and revision,
+preserves unrelated projects, and restores the original bytes on failure.
 
 Broker send acknowledgement alone is insufficient. Record canonical inbox,
 coordinator state, child result, outbox, peer inbox, and caller-visible result
