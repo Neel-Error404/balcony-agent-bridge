@@ -129,7 +129,6 @@ describe("MCP server", () => {
           outcome: "completed",
         },
       },
-      expiresAtUtc: "2026-08-20T12:00:00.000Z",
       now: new Date("2026-08-13T12:00:00.000Z"),
     });
     database.persistIncoming(result, 1);
@@ -432,7 +431,6 @@ function incomingEnvelope(idempotencyKey: string) {
       body: "Exercise the native coding-agent tool boundary.",
       evidence: [],
     },
-    expiresAtUtc: "2026-08-20T12:00:00.000Z",
     now: new Date("2026-08-13T12:00:00.000Z"),
   });
 }

@@ -59,6 +59,21 @@ runtime clone while the different-owner condition was forced:
 - Evidence bytes: `6736`.
 - Isolated global Git config bytes after collection: `0`.
 
+## Post-Review Fixture Amendment
+
+SYS-B review of candidate `bddcc19eba6938a03e866ebbd24c364c32307cc7`
+identified two generic MCP integration fixtures with an absolute
+`expiresAtUtc` value. Neither scenario tests expiration, and the fixed value
+eventually caused the inbox-lifecycle case to observe zero claimable messages.
+
+The amendment removes only those two expiration fields from
+`tests/integration/mcp-server.test.ts`. Before the amendment, the focused file
+reproduced the issue with six passes and one failure. After the amendment, the
+same file passed `7/7`. Dedicated expiration tests retain deterministic clocks
+and passed in the complete ladder. The production
+`pinned-git-evidence-provider.ts` blob remains identical to the published
+`bddcc19` candidate.
+
 ## Verification Ladder
 
 | Level | Result |
@@ -75,7 +90,9 @@ The first full integration invocation reported `22/24` because the MCP stdio
 and simultaneous migration child-process tests both crossed their existing
 five-second timeout. Each passed independently (`1/1`), and the unchanged full
 integration level then passed `24/24`. No unrelated timeout or test-production
-code was changed.
+code was changed. After the post-review fixture amendment, a fresh complete
+ladder passed all six levels on their first invocation, including integration
+at `24/24`.
 
 Additional gates:
 
