@@ -171,9 +171,20 @@ function Restore-DispatcherAclSnapshot {
 
     $snapshot = @(Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json)
     foreach ($entry in $snapshot) {
-        $acl = Get-Acl -LiteralPath $entry.path
-        $acl.SetSecurityDescriptorSddlForm([string] $entry.sddl)
-        Set-Acl -LiteralPath $entry.path -AclObject $acl
+        $acl = New-Object Security.AccessControl.FileSecurity
+        $acl.SetSecurityDescriptorSddlForm(
+            [string] $entry.sddl,
+            [Security.AccessControl.AccessControlSections]::Access
+        )
+        if ($PSVersionTable.PSEdition -eq "Core") {
+            [IO.FileSystemAclExtensions]::SetAccessControl(
+                [IO.FileInfo]::new([string] $entry.path),
+                $acl
+            )
+        }
+        else {
+            [IO.File]::SetAccessControl([string] $entry.path, $acl)
+        }
     }
 }
 
@@ -430,6 +441,7 @@ $aclProtectedPaths = @(
     $BridgeDataDirectory,
     $binaryDirectory,
     $installedCodexExecutable,
+    $installedCodexCodeModeHost,
     $NodeExecutable,
     $GitExecutable,
     $logDirectory,

@@ -18,12 +18,25 @@ const updaterPath = path.join(
   "scripts/Update-DispatcherService.ps1",
 );
 
-function runPowerShell(source: string) {
+function runPowerShell(source: string, executable = "powershell.exe") {
   const encoded = Buffer.from(source, "utf16le").toString("base64");
+  const childEnvironment = { ...process.env };
+  if (executable.toLowerCase() === "powershell.exe") {
+    childEnvironment["PSModulePath"] = [
+      path.join(
+        process.env["SystemRoot"] ?? "C:\\Windows",
+        "System32/WindowsPowerShell/v1.0/Modules",
+      ),
+      path.join(
+        process.env["ProgramFiles"] ?? "C:\\Program Files",
+        "WindowsPowerShell/Modules",
+      ),
+    ].join(";");
+  }
   return spawnSync(
-    "powershell.exe",
+    executable,
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-    { cwd: repositoryRoot, encoding: "utf8" },
+    { cwd: repositoryRoot, encoding: "utf8", env: childEnvironment },
   );
 }
 
@@ -182,5 +195,109 @@ describe("dispatcher service lifecycle recovery", () => {
     expect(failure.summary).toContain("nativeCode=1061");
     expect(result.stdout).not.toContain("SECRET_MARKER");
     expect(result.stderr).not.toContain("SECRET_MARKER");
+  });
+
+  it("restores a pre-existing code-mode host byte hash and distinct SDDL", () => {
+    const escapedUpdaterPath = updaterPath.replaceAll("\\", "\\\\");
+    const source = `
+      $ErrorActionPreference = "Stop"
+      if ($PSVersionTable.PSEdition -eq "Desktop") {
+        $env:PSModulePath = "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\Modules;$env:ProgramFiles\\WindowsPowerShell\\Modules"
+      }
+      Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+      $tokens = $null
+      $parseErrors = $null
+      $ast = [Management.Automation.Language.Parser]::ParseFile(
+        "${escapedUpdaterPath}",
+        [ref] $tokens,
+        [ref] $parseErrors
+      )
+      if ($parseErrors.Count -ne 0) { throw "Updater parse failed" }
+      $requiredFunctions = @(
+        "Backup-DispatcherAclSnapshot",
+        "Restore-DispatcherAclSnapshot",
+        "Assert-DispatcherAclSnapshot"
+      )
+      $definitions = @($ast.FindAll({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+          $requiredFunctions -contains $node.Name
+      }, $true))
+      if ($definitions.Count -ne $requiredFunctions.Count) {
+        throw "ACL rollback helpers are incomplete"
+      }
+      foreach ($definition in $definitions) {
+        Invoke-Expression $definition.Extent.Text
+      }
+
+      $testRoot = Join-Path ([IO.Path]::GetTempPath()) (
+        "dispatcher-host-acl-" + [guid]::NewGuid().ToString("N")
+      )
+      New-Item -ItemType Directory -Path $testRoot | Out-Null
+      try {
+        $hostPath = Join-Path $testRoot "codex-code-mode-host.exe"
+        $backupPath = Join-Path $testRoot "codex-code-mode-host.backup.exe"
+        $aclSnapshotPath = Join-Path $testRoot "acl-snapshot.json"
+        [IO.File]::WriteAllBytes($hostPath, [Text.Encoding]::UTF8.GetBytes("original-host-bytes"))
+        Copy-Item -LiteralPath $hostPath -Destination $backupPath
+
+        $owner = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $initialAcl = Get-Acl -LiteralPath $hostPath
+        $initialAcl.SetAccessRuleProtection($true, $false)
+        $initialAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+          $owner,
+          [Security.AccessControl.FileSystemRights]::FullControl,
+          [Security.AccessControl.AccessControlType]::Allow
+        )))
+        Set-Acl -LiteralPath $hostPath -AclObject $initialAcl
+        $initialSddl = (Get-Acl -LiteralPath $hostPath).Sddl
+        $directorySddl = (Get-Acl -LiteralPath $testRoot).Sddl
+        if ($initialSddl -eq $directorySddl) {
+          throw "Companion ACL fixture is not distinct"
+        }
+        $initialHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPath).Hash
+
+        Backup-DispatcherAclSnapshot -Paths @($hostPath) -Destination $aclSnapshotPath
+
+        [IO.File]::WriteAllBytes($hostPath, [Text.Encoding]::UTF8.GetBytes("mutated-host-bytes"))
+        $null = & icacls.exe $hostPath /grant '*S-1-5-19:(RX)'
+        if ($LASTEXITCODE -ne 0) {
+          throw "Forward companion ACL mutation failed"
+        }
+        $mutatedSddl = (Get-Acl -LiteralPath $hostPath).Sddl
+        if ($mutatedSddl -eq $initialSddl) {
+          throw "Forward ACL mutation did not change the companion SDDL"
+        }
+
+        Copy-Item -LiteralPath $backupPath -Destination $hostPath -Force
+        Restore-DispatcherAclSnapshot -Path $aclSnapshotPath
+        Assert-DispatcherAclSnapshot -Path $aclSnapshotPath
+
+        $restoredHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPath).Hash
+        $restoredSddl = (Get-Acl -LiteralPath $hostPath).Sddl
+        [pscustomobject]@{
+          hashRestored = $restoredHash -eq $initialHash
+          sddlRestored = $restoredSddl -eq $initialSddl
+          sddlWasDistinct = $initialSddl -ne $directorySddl
+          forwardAclMutated = $mutatedSddl -ne $initialSddl
+        } | ConvertTo-Json -Compress
+      }
+      finally {
+        if (Test-Path -LiteralPath $testRoot) {
+          Remove-Item -LiteralPath $testRoot -Recurse -Force
+        }
+      }
+    `;
+
+    for (const executable of ["powershell.exe", "pwsh.exe"]) {
+      const result = runPowerShell(source, executable);
+      expect(result.status, `${executable}: ${result.stderr}`).toBe(0);
+      expect(JSON.parse(result.stdout.trim())).toEqual({
+        hashRestored: true,
+        sddlRestored: true,
+        sddlWasDistinct: true,
+        forwardAclMutated: true,
+      });
+    }
   });
 });

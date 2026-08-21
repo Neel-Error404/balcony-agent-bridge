@@ -56,4 +56,13 @@ describe("dispatcher service upgrade recovery", () => {
     expect(script).toContain("Rollback backup ");
     expect(script).toContain("retained at $backupDirectory");
   });
+
+  it("captures the pre-existing code-mode host in the ACL rollback snapshot", () => {
+    const aclPathsStart = script.indexOf("$aclProtectedPaths = @(");
+    const aclPathsEnd = script.indexOf(") | Where-Object", aclPathsStart);
+    const aclPaths = script.slice(aclPathsStart, aclPathsEnd);
+
+    expect(aclPaths).toContain("$installedCodexExecutable");
+    expect(aclPaths).toContain("$installedCodexCodeModeHost");
+  });
 });
