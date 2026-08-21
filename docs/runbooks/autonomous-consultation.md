@@ -159,8 +159,23 @@ The script must receive the approved `codex.exe` and sibling
 `codex-code-mode-host.exe`; it does not discover or trust a user-profile copy.
 The preflight validates the currently registered bridge checkout and computes
 the desired release pin without mutating the registry. The real transaction
-backs up the registry, atomically changes only the bridge path and revision,
-preserves unrelated projects, and restores the original bytes on failure.
+backs up the registry, service XML, installed Codex bundle, and affected ACL
+descriptors before stopping the dispatcher. It waits for `Stopped`, service
+PID zero, and the former wrapper and child processes to exit before mutation.
+Startup is bounded to three attempts and requires `Running` plus exactly one
+service-owned Node child. A failure reports only the stage, exception type,
+HRESULT/native code, and bounded service state; exception messages are not
+included because they may contain machine-local paths. Rollback restores and
+verifies the original bytes, ACLs, startup mode, running/stopped selection, and
+one-child state. The rollback directory remains in the dispatcher install root
+until local acceptance and a SYS-A-triggered nested acceptance both pass.
+
+The updater deliberately does not inspect the bridge service or Azure queues.
+The operator must snapshot the bridge PID and queue/DLQ/transfer-DLQ counts
+before `-WhatIf`, after the real transaction, and after acceptance. Any bridge
+PID change or queue-baseline drift blocks acceptance. Do not delete the
+previous registered worktree until the new runtime is accepted and no service
+XML or project-registry entry references it.
 
 Broker send acknowledgement alone is insufficient. Record canonical inbox,
 coordinator state, child result, outbox, peer inbox, and caller-visible result

@@ -184,10 +184,21 @@ the desired candidate pin in memory, and does not require or perform a
 premature registry edit during `-WhatIf`. A real upgrade preserves the
 dedicated `CODEX_HOME`, database, service identity, existing startup selection,
 and every unrelated registry entry. It backs up the registry, service XML, and
-installed Codex bundle before stopping only `BalconyAgentDispatcher`,
-atomically migrates only the `balcony-agent-bridge` path and revision, verifies
-one service-owned child after restart, and restores the exact original registry
-and previous runtime state if acceptance fails.
+installed Codex bundle plus affected ACL descriptors before stopping only
+`BalconyAgentDispatcher`. It waits for the service state, wrapper PID, and child
+processes to become fully quiescent before mutation, atomically migrates only
+the `balcony-agent-bridge` path and revision, and uses bounded restart attempts
+that require one service-owned child. On failure it returns secret-safe forward
+and rollback stage/type/code evidence, restores and verifies the exact original
+registry, files, ACLs, startup mode, and runtime state, and retains the rollback
+directory. Do not remove that directory or the previous registered worktree
+until local runtime acceptance and a SYS-A-triggered nested acceptance pass and
+no service or registry reference remains.
+
+Before and after the transaction, the operator must independently record the
+bridge PID and Service Bus active/DLQ/transfer-DLQ counts. The updater has no
+bridge or Azure mutation authority, so bridge-PID and queue invariance are
+external acceptance gates. Any unexplained drift stops deployment closeout.
 
 The installer or upgrade copies the two Codex executables into the same
 restricted ProgramData `bin` directory, verifies both after copying, and

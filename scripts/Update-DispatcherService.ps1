@@ -62,7 +62,19 @@ param(
     [int] $DefaultTimeoutSeconds = 300,
 
     [ValidateRange(1024, 60000)]
-    [int] $MaxOutputBytes = 48000
+    [int] $MaxOutputBytes = 48000,
+
+    [ValidateRange(1, 120)]
+    [int] $ServiceStopTimeoutSeconds = 30,
+
+    [ValidateRange(1, 120)]
+    [int] $ServiceStartTimeoutSeconds = 30,
+
+    [ValidateRange(1, 5)]
+    [int] $ServiceStartMaxAttempts = 3,
+
+    [ValidateRange(0, 10000)]
+    [int] $ServiceRetryDelayMs = 1000
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,7 +84,12 @@ $serviceSidAccount = "NT SERVICE\$serviceName"
 $registryMigrationModule = Join-Path (
     $PSScriptRoot
 ) "DispatcherRegistryMigration.psm1"
+$serviceLifecycleModule = Join-Path (
+    $PSScriptRoot
+) "DispatcherServiceLifecycle.psm1"
 Import-Module -Force -Name $registryMigrationModule
+Import-Module -Force -Name $serviceLifecycleModule
+$serviceAdapter = New-DispatcherServiceAdapter
 
 function Assert-ContainedPath {
     param(
@@ -126,6 +143,66 @@ function Add-FileSystemAccessRule {
         [Security.AccessControl.AccessControlType]::Allow
     )))
     Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Backup-DispatcherAclSnapshot {
+    param(
+        [Parameter(Mandatory)] [string[]] $Paths,
+        [Parameter(Mandatory)] [string] $Destination
+    )
+
+    $snapshot = @(
+        $Paths |
+            Select-Object -Unique |
+            ForEach-Object {
+                $resolvedPath = (Resolve-Path -LiteralPath $_).Path
+                [pscustomobject]@{
+                    path = $resolvedPath
+                    sddl = (Get-Acl -LiteralPath $resolvedPath).Sddl
+                }
+            }
+    )
+    $snapshot | ConvertTo-Json -Depth 3 | Set-Content `
+        -LiteralPath $Destination -Encoding UTF8
+}
+
+function Restore-DispatcherAclSnapshot {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    $snapshot = @(Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json)
+    foreach ($entry in $snapshot) {
+        $acl = Get-Acl -LiteralPath $entry.path
+        $acl.SetSecurityDescriptorSddlForm([string] $entry.sddl)
+        Set-Acl -LiteralPath $entry.path -AclObject $acl
+    }
+}
+
+function Assert-DispatcherAclSnapshot {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    $snapshot = @(Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json)
+    foreach ($entry in $snapshot) {
+        $actual = (Get-Acl -LiteralPath $entry.path).Sddl
+        if ($actual -ne [string] $entry.sddl) {
+            throw "A dispatcher ACL did not match the retained rollback snapshot."
+        }
+    }
+}
+
+function Get-DispatcherFailureSnapshot {
+    try {
+        return Get-DispatcherServiceSnapshot `
+            -ServiceName $serviceName -Adapter $serviceAdapter
+    }
+    catch {
+        return [pscustomobject]@{
+            State = "Unknown"
+            StartMode = "Unknown"
+            ProcessId = 0
+            ChildProcessIds = @()
+            ChildCount = 0
+        }
+    }
 }
 
 if ($env:BALCONY_SYSTEM_ID -ne $SystemId) {
@@ -341,32 +418,122 @@ $backupCodexCodeModeHost = Join-Path (
     $backupDirectory
 ) "codex-code-mode-host.exe"
 $backupProjectRegistry = Join-Path $backupDirectory "projects.json"
+$backupAclSnapshot = Join-Path $backupDirectory "acl-snapshot.json"
 $hadCodeModeHost = Test-Path -LiteralPath (
     $installedCodexCodeModeHost
 ) -PathType Leaf
 $wasRunning = $service.State -eq "Running"
+$originalStartMode = [string] $service.StartMode
+$aclProtectedPaths = @(
+    $RepositoryRoot,
+    $ProjectRegistryPath,
+    $BridgeDataDirectory,
+    $binaryDirectory,
+    $installedCodexExecutable,
+    $NodeExecutable,
+    $GitExecutable,
+    $logDirectory,
+    $workDirectory,
+    $codexHome
+) | Where-Object { Test-Path -LiteralPath $_ }
 
 function Restore-PreviousDispatcherState {
-    $current = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    if ($current -and $current.Status -ne "Stopped") {
-        $current | Stop-Service -Force
-    }
+    param([Parameter(Mandatory)] [ref] $Stage)
+
+    $Stage.Value = "rollback-stop-quiescence"
+    Stop-DispatcherServiceAndWait `
+        -ServiceName $serviceName `
+        -Adapter $serviceAdapter `
+        -TimeoutSeconds $ServiceStopTimeoutSeconds | Out-Null
+    $Stage.Value = "rollback-restore-configuration"
     Copy-Item -LiteralPath $backupConfiguration `
         -Destination $serviceConfiguration -Force
+    $Stage.Value = "rollback-restore-codex"
     Copy-Item -LiteralPath $backupCodexExecutable `
         -Destination $installedCodexExecutable -Force
     if ($hadCodeModeHost) {
+        $Stage.Value = "rollback-restore-code-mode-host"
         Copy-Item -LiteralPath $backupCodexCodeModeHost `
             -Destination $installedCodexCodeModeHost -Force
     }
     elseif (Test-Path -LiteralPath $installedCodexCodeModeHost -PathType Leaf) {
+        $Stage.Value = "rollback-remove-code-mode-host"
         Remove-Item -LiteralPath $installedCodexCodeModeHost -Force
     }
+    $Stage.Value = "rollback-restore-registry"
     Restore-DispatcherProjectRegistry `
         -Path $ProjectRegistryPath `
         -BackupPath $backupProjectRegistry
+    $Stage.Value = "rollback-restore-acls"
+    Restore-DispatcherAclSnapshot -Path $backupAclSnapshot
     if ($wasRunning) {
-        Start-Service -Name $serviceName
+        $Stage.Value = "rollback-start"
+        Start-DispatcherServiceWithRetry `
+            -ServiceName $serviceName `
+            -Adapter $serviceAdapter `
+            -MaxAttempts $ServiceStartMaxAttempts `
+            -HealthTimeoutSeconds $ServiceStartTimeoutSeconds `
+            -RetryDelayMs $ServiceRetryDelayMs | Out-Null
+    }
+}
+
+function Assert-RestoredDispatcherState {
+    param([Parameter(Mandatory)] [ref] $Stage)
+
+    $Stage.Value = "rollback-verify-configuration"
+    Assert-FileHash -Path $serviceConfiguration `
+        -ExpectedSha256 (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $backupConfiguration
+        ).Hash -Label "Restored dispatcher configuration"
+    $Stage.Value = "rollback-verify-codex"
+    Assert-FileHash -Path $installedCodexExecutable `
+        -ExpectedSha256 (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $backupCodexExecutable
+        ).Hash -Label "Restored Codex executable"
+    if ($hadCodeModeHost) {
+        $Stage.Value = "rollback-verify-code-mode-host"
+        Assert-FileHash -Path $installedCodexCodeModeHost `
+            -ExpectedSha256 (
+                Get-FileHash `
+                    -Algorithm SHA256 `
+                    -LiteralPath $backupCodexCodeModeHost
+            ).Hash -Label "Restored Codex code-mode host"
+    }
+    elseif (Test-Path -LiteralPath $installedCodexCodeModeHost -PathType Leaf) {
+        throw "Rollback retained an executable that was absent before upgrade."
+    }
+    $Stage.Value = "rollback-verify-registry"
+    Assert-FileHash -Path $ProjectRegistryPath `
+        -ExpectedSha256 (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $backupProjectRegistry
+        ).Hash -Label "Restored dispatcher project registry"
+    $Stage.Value = "rollback-verify-acls"
+    Assert-DispatcherAclSnapshot -Path $backupAclSnapshot
+    $Stage.Value = "rollback-verify-service"
+    $snapshot = Get-DispatcherServiceSnapshot `
+        -ServiceName $serviceName -Adapter $serviceAdapter
+    if ($snapshot.StartMode -ne $originalStartMode) {
+        throw "Rollback did not preserve the dispatcher service start mode."
+    }
+    if (
+        $wasRunning -and
+        (
+            $snapshot.State -ne "Running" -or
+            $snapshot.ProcessId -eq 0 -or
+            $snapshot.ChildCount -ne 1
+        )
+    ) {
+        throw "Rollback did not restore the running one-child dispatcher state."
+    }
+    if (
+        -not $wasRunning -and
+        (
+            $snapshot.State -ne "Stopped" -or
+            $snapshot.ProcessId -ne 0 -or
+            $snapshot.ChildCount -ne 0
+        )
+    ) {
+        throw "Rollback did not restore the stopped dispatcher state."
     }
 }
 
@@ -386,26 +553,38 @@ if ($PSCmdlet.ShouldProcess(
     Backup-DispatcherProjectRegistry `
         -Path $ProjectRegistryPath `
         -BackupPath $backupProjectRegistry
+    Backup-DispatcherAclSnapshot `
+        -Paths $aclProtectedPaths `
+        -Destination $backupAclSnapshot
 
+    $operationStage = "forward-stop-quiescence"
     try {
-        Stop-Service -Name $serviceName -Force
+        Stop-DispatcherServiceAndWait `
+            -ServiceName $serviceName `
+            -Adapter $serviceAdapter `
+            -TimeoutSeconds $ServiceStopTimeoutSeconds | Out-Null
+        $operationStage = "forward-install-codex"
         Copy-Item -LiteralPath $CodexExecutable `
             -Destination $installedCodexExecutable -Force
         Copy-Item -LiteralPath $CodexCodeModeHostExecutable `
             -Destination $installedCodexCodeModeHost -Force
+        $operationStage = "forward-verify-codex"
         Assert-FileHash -Path $installedCodexExecutable `
             -ExpectedSha256 $CodexExecutableSha256 `
             -Label "Installed Codex executable"
         Assert-FileHash -Path $installedCodexCodeModeHost `
             -ExpectedSha256 $CodexCodeModeHostExecutableSha256 `
             -Label "Installed Codex code-mode host"
+        $operationStage = "forward-write-configuration"
         Set-Content -LiteralPath $serviceConfiguration `
             -Value $template -Encoding UTF8
+        $operationStage = "forward-write-registry"
         Set-DispatcherProjectRegistry `
             -Path $ProjectRegistryPath `
             -Content $desiredRegistryJson `
             -Confirm:$false
 
+        $operationStage = "forward-apply-acls"
         $serviceIdentity = New-Object Security.Principal.NTAccount(
             $serviceSidAccount
         )
@@ -430,47 +609,66 @@ if ($PSCmdlet.ShouldProcess(
                 -Identity $serviceIdentity -Rights Modify
         }
 
-        Start-Service -Name $serviceName
-        $deadline = [DateTime]::UtcNow.AddSeconds(20)
-        do {
-            Start-Sleep -Milliseconds 500
-            $running = Get-CimInstance Win32_Service `
-                -Filter "Name='$serviceName'"
-            $serviceChildren = @(
-                Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-                    Where-Object { $_.ParentProcessId -eq $running.ProcessId }
-            )
-        } while (
-            ($running.State -ne "Running" -or $serviceChildren.Count -ne 1) -and
-            [DateTime]::UtcNow -lt $deadline
-        )
-        if ($running.State -ne "Running" -or $serviceChildren.Count -ne 1) {
-            throw "The upgraded dispatcher must have exactly one service-owned Node child."
-        }
+        $operationStage = "forward-start"
+        Start-DispatcherServiceWithRetry `
+            -ServiceName $serviceName `
+            -Adapter $serviceAdapter `
+            -MaxAttempts $ServiceStartMaxAttempts `
+            -HealthTimeoutSeconds $ServiceStartTimeoutSeconds `
+            -RetryDelayMs $ServiceRetryDelayMs | Out-Null
         if (-not $wasRunning) {
-            Stop-Service -Name $serviceName
+            $operationStage = "forward-restore-stopped-state"
+            Stop-DispatcherServiceAndWait `
+                -ServiceName $serviceName `
+                -Adapter $serviceAdapter `
+                -TimeoutSeconds $ServiceStopTimeoutSeconds | Out-Null
         }
 
-        Remove-Item -LiteralPath $backupDirectory -Recurse -Force
         Write-Output (
             "Upgraded $serviceName to consultation mode at revision " +
             "$ApprovedRevision. Dedicated CODEX_HOME was preserved and the " +
-            "bridge registry pin was atomically migrated."
+            "bridge registry pin was atomically migrated. Rollback backup " +
+            "retained at $backupDirectory until post-deployment acceptance."
         )
     }
     catch {
+        $forwardError = $_
+        $forwardFailureStage = $operationStage
+        $forwardSnapshot = Get-DispatcherFailureSnapshot
         try {
-            Restore-PreviousDispatcherState
-            Remove-Item -LiteralPath $backupDirectory -Recurse -Force
+            Restore-PreviousDispatcherState -Stage ([ref] $operationStage)
+            Assert-RestoredDispatcherState -Stage ([ref] $operationStage)
         }
         catch {
-            throw (
-                "Dispatcher upgrade failed and rollback also failed. " +
-                "Manual recovery is required."
-            )
+            $rollbackError = $_
+            $rollbackFailureStage = $operationStage
+            $rollbackSnapshot = Get-DispatcherFailureSnapshot
+            $forwardSummary = Format-DispatcherServiceFailure `
+                -Stage $forwardFailureStage `
+                -ErrorRecord $forwardError `
+                -Snapshot $forwardSnapshot
+            $rollbackSummary = Format-DispatcherServiceFailure `
+                -Stage $rollbackFailureStage `
+                -ErrorRecord $rollbackError `
+                -Snapshot $rollbackSnapshot
+            throw (New-Object InvalidOperationException(
+                (
+                    "Dispatcher upgrade failed and rollback also failed. " +
+                    "Forward[$forwardSummary] Rollback[$rollbackSummary] " +
+                    "Manual recovery is required; rollback backup retained."
+                )
+            ))
         }
-        throw (
-            "Dispatcher upgrade failed. The previous dispatcher state was restored."
-        )
+        $forwardSummary = Format-DispatcherServiceFailure `
+            -Stage $forwardFailureStage `
+            -ErrorRecord $forwardError `
+            -Snapshot $forwardSnapshot
+        throw (New-Object InvalidOperationException(
+            (
+                "Dispatcher upgrade failed. The previous dispatcher state " +
+                "was restored. Forward[$forwardSummary] Rollback backup " +
+                "retained for acceptance evidence."
+            )
+        ))
     }
 }

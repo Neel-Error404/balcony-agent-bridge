@@ -14,6 +14,12 @@ const script = fs
     "utf8",
   )
   .replace(/\r\n/g, "\n");
+const lifecycle = fs
+  .readFileSync(
+    path.join(repositoryRoot, "scripts/DispatcherServiceLifecycle.psm1"),
+    "utf8",
+  )
+  .replace(/\r\n/g, "\n");
 
 describe("dispatcher existing-service upgrade contract", () => {
   it("requires exact release and two-file Codex bundle pins", () => {
@@ -29,8 +35,10 @@ describe("dispatcher existing-service upgrade contract", () => {
     expect(script).toContain("Dispatcher service '$serviceName' is not installed");
     expect(script).toContain("The dedicated dispatcher CODEX_HOME must already exist");
     expect(script).toContain("The machine-local project registry must remain outside Git");
-    expect(script).toContain("Stop-Service -Name $serviceName");
-    expect(script).toContain("Start-Service -Name $serviceName");
+    expect(script).toContain("Stop-DispatcherServiceAndWait");
+    expect(script).toContain("Start-DispatcherServiceWithRetry");
+    expect(lifecycle).toContain("Stop-Service -Name $ServiceName");
+    expect(lifecycle).toContain("Start-Service -Name $ServiceName");
     expect(script).not.toContain("BalconyAgentBridge");
     expect(script).not.toContain("Remove-Service");
     expect(script).not.toContain("Uninstall");
@@ -47,6 +55,6 @@ describe("dispatcher existing-service upgrade contract", () => {
     expect(script).toContain('[ValidateSet("consultation")]');
     expect(script).toContain('"__DISPATCHER_MODE__" = $DispatcherMode');
     expect(script).toContain('"__DISPATCHER_ENTRYPOINT__" = $dispatcherEntrypoint');
-    expect(script).toContain("exactly one service-owned Node child");
+    expect(lifecycle).toContain("$snapshot.ChildCount -eq 1");
   });
 });
