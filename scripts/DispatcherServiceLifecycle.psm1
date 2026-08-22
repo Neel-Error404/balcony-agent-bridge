@@ -10,17 +10,14 @@ function New-DispatcherServiceAdapter {
             if (-not $service) {
                 throw "The dispatcher service is not installed."
             }
-            $children = if ($service.ProcessId -gt 0) {
-                @(
+            $children = @(
+                if ($service.ProcessId -gt 0) {
                     Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
                         Where-Object {
                             $_.ParentProcessId -eq $service.ProcessId
                         }
-                )
-            }
-            else {
-                @()
-            }
+                }
+            )
             return [pscustomobject]@{
                 State = [string] $service.State
                 StartMode = [string] $service.StartMode

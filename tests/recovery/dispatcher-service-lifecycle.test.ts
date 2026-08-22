@@ -52,6 +52,48 @@ describe("dispatcher service lifecycle recovery", () => {
     expect(updater).not.toMatch(/^\s*Stop-Service\b/gmu);
   });
 
+  it("snapshots a stopped service with an empty child collection", () => {
+    const result = runPowerShell(`
+      $ErrorActionPreference = "Stop"
+      function global:Get-CimInstance {
+        param(
+          [Parameter(Position = 0)] [string] $ClassName,
+          [string] $Filter
+        )
+        if ($ClassName -eq "Win32_Service") {
+          return [pscustomobject]@{
+            State = "Stopped"
+            StartMode = "Manual"
+            ProcessId = 0
+          }
+        }
+        throw "Unexpected CIM query"
+      }
+      try {
+        Import-Module -Force "${modulePath.replaceAll("\\", "\\\\")}"
+        $adapter = New-DispatcherServiceAdapter
+        $snapshot = Get-DispatcherServiceSnapshot -ServiceName "TestDispatcher" -Adapter $adapter
+        [pscustomobject]@{
+          state = $snapshot.State
+          processId = $snapshot.ProcessId
+          childCount = $snapshot.ChildCount
+          childProcessIds = @($snapshot.ChildProcessIds)
+        } | ConvertTo-Json -Compress
+      }
+      finally {
+        Remove-Item Function:\\global:Get-CimInstance -ErrorAction SilentlyContinue
+      }
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      state: "Stopped",
+      processId: 0,
+      childCount: 0,
+      childProcessIds: [],
+    });
+  });
+
   it("waits for the stopped wrapper and its child to exit", () => {
     const result = runPowerShell(`
       $ErrorActionPreference = "Stop"
