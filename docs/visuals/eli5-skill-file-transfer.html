@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A simple visual explanation of the proposed SYS-A to SYS-B skill file transfer.">
+  <title>ELI5: SYS-A to SYS-B Skill Transfer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5b6475;
+      --paper: #fffdf7;
+      --panel: #ffffff;
+      --blue: #2762d6;
+      --blue-soft: #eaf1ff;
+      --green: #13795b;
+      --green-soft: #e7f7f0;
+      --amber: #9a5b00;
+      --amber-soft: #fff4d6;
+      --red: #b42318;
+      --red-soft: #ffebe8;
+      --line: #dbe1ea;
+      --shadow: 0 18px 50px rgba(23, 32, 51, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 5%, #e6f5ff 0, transparent 28rem),
+        radial-gradient(circle at 88% 20%, #fff0c8 0, transparent 25rem),
+        var(--paper);
+      line-height: 1.45;
+    }
+
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 72px; overflow-wrap: anywhere; }
+
+    header { text-align: center; padding: 26px 12px 36px; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      font-size: .78rem;
+    }
+
+    h1 { margin: 18px auto 12px; max-width: 900px; font-size: clamp(2.2rem, 6vw, 5rem); line-height: .98; }
+    header p { max-width: 720px; margin: 0 auto; font-size: clamp(1.05rem, 2vw, 1.35rem); color: var(--muted); }
+
+    .verdict {
+      margin: 16px auto 0;
+      max-width: 880px;
+      padding: 18px 22px;
+      border: 2px solid #f0b429;
+      border-radius: 18px;
+      background: var(--amber-soft);
+      font-size: clamp(1.05rem, 2vw, 1.3rem);
+      font-weight: 800;
+    }
+
+    .panel {
+      margin-top: 26px;
+      padding: clamp(22px, 4vw, 42px);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(255, 255, 255, .92);
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 { margin: 0 0 8px; font-size: clamp(1.55rem, 3vw, 2.35rem); }
+    .lead { margin: 0 0 26px; color: var(--muted); font-size: 1.08rem; }
+
+    .parcel-grid, .status-grid, .next-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .object, .status, .next {
+      min-width: 0;
+      min-height: 190px;
+      padding: 22px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .object { text-align: center; }
+    .object svg { width: 98px; height: 98px; margin-bottom: 10px; }
+    .object h3, .status h3, .next h3 { margin: 0 0 7px; font-size: 1.15rem; }
+    .object p, .status p, .next p { margin: 0; color: var(--muted); }
+
+    .route {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: center;
+      gap: 14px;
+      margin-top: 20px;
+    }
+
+    .stop {
+      padding: 20px 14px;
+      border: 2px solid var(--line);
+      border-radius: 22px;
+      text-align: center;
+      background: #fff;
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .stop.active { transform: translateY(-5px); border-color: var(--blue); box-shadow: 0 10px 26px rgba(39, 98, 214, .16); }
+    .stop .big { display: block; font-size: 3.3rem; line-height: 1; margin-bottom: 10px; }
+    .stop strong { display: block; font-size: 1.08rem; }
+    .stop small { display: block; margin-top: 5px; color: var(--muted); }
+    .arrow { color: var(--blue); font-size: 2.3rem; font-weight: 900; }
+
+    .two-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .lane { padding: 24px; border-radius: 24px; }
+    .lane.cargo { background: var(--blue-soft); border: 2px solid #b8cdf8; }
+    .lane.message { background: var(--green-soft); border: 2px solid #b3e0d0; }
+    .lane-icon { font-size: 3.5rem; line-height: 1; }
+    .lane h3 { margin: 14px 0 7px; font-size: 1.35rem; }
+    .lane p { margin: 0; color: var(--muted); }
+    .lane code { word-break: break-word; font-size: .82rem; }
+
+    .status { position: relative; padding-top: 54px; }
+    .status::before {
+      position: absolute;
+      top: 18px;
+      left: 20px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: .76rem;
+      letter-spacing: .05em;
+    }
+    .status.done { background: var(--green-soft); border-color: #acd8c8; }
+    .status.done::before { content: "BUILT + TESTED"; color: var(--green); background: #fff; }
+    .status.wait { background: var(--amber-soft); border-color: #f3cf77; }
+    .status.wait::before { content: "WAITING"; color: var(--amber); background: #fff; }
+    .status.no { background: var(--red-soft); border-color: #f3b6af; }
+    .status.no::before { content: "NOT BUILT"; color: var(--red); background: #fff; }
+
+    .next { min-height: 160px; border-top: 7px solid var(--blue); }
+    .number {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      margin-bottom: 14px;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--blue);
+      font-weight: 900;
+      font-size: 1.2rem;
+    }
+
+    details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
+    summary { cursor: pointer; font-weight: 800; color: var(--blue); }
+    summary:focus-visible, button:focus-visible { outline: 4px solid #82a8ff; outline-offset: 3px; }
+    .facts { margin: 14px 0 0; padding-left: 20px; color: var(--muted); }
+    .facts li + li { margin-top: 7px; }
+    code { font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; word-break: break-word; }
+
+    .remember {
+      margin-top: 28px;
+      padding: 24px;
+      border-radius: 24px;
+      color: #fff;
+      background: var(--ink);
+      text-align: center;
+      font-size: clamp(1.25rem, 2.5vw, 1.8rem);
+      font-weight: 900;
+    }
+
+    .pulse-button {
+      display: block;
+      margin: 24px auto 0;
+      padding: 11px 17px;
+      border: 0;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--blue);
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    @media (max-width: 780px) {
+      .parcel-grid, .status-grid, .next-grid, .two-lanes { grid-template-columns: 1fr; }
+      .route { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); text-align: center; }
+      .object, .status, .next { min-height: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="eyebrow">SYS-A → SYS-B · skill transfer</span>
+      <h1>Think of it as a secure parcel delivery.</h1>
+      <p>The skills are files inside a ZIP. Git carries the parcel; the bridge only tells the other machine where to collect it.</p>
+      <div class="verdict">The packing station is built. The parcel has not left SYS-A yet.</div>
+    </header>
+
+    <section class="panel" aria-labelledby="parcel-title">
+      <h2 id="parcel-title">1. What is inside the parcel?</h2>
+      <p class="lead">Three pieces make the transfer safe and understandable.</p>
+      <div class="parcel-grid">
+        <article class="object">
+          <svg viewBox="0 0 120 120" role="img" aria-label="A cardboard parcel">
+            <path d="M18 34 60 14l42 20-42 20z" fill="#f5bd62" stroke="#6b4515" stroke-width="4"/>
+            <path d="M18 34v52l42 20V54z" fill="#e6a645" stroke="#6b4515" stroke-width="4"/>
+            <path d="M102 34v52l-42 20V54z" fill="#ffd17f" stroke="#6b4515" stroke-width="4"/>
+            <path d="M45 21 87 41v18l-11-3-10 12V51L29 34z" fill="#fff3c8" stroke="#6b4515" stroke-width="3"/>
+          </svg>
+          <h3>ZIP = the parcel</h3>
+          <p>18 Codex skills plus 8 required Agents mirrors.</p>
+        </article>
+        <article class="object">
+          <svg viewBox="0 0 120 120" role="img" aria-label="A packing slip with checkmarks">
+            <rect x="25" y="12" width="70" height="96" rx="8" fill="#edf3ff" stroke="#2762d6" stroke-width="4"/>
+            <path d="m38 40 7 7 13-15M38 67l7 7 13-15" fill="none" stroke="#13795b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M66 40h17M66 67h17M38 91h45" stroke="#5b6475" stroke-width="5" stroke-linecap="round"/>
+          </svg>
+          <h3>Manifest = packing slip</h3>
+          <p>It says exactly what should be inside and who should receive it.</p>
+        </article>
+        <article class="object">
+          <svg viewBox="0 0 120 120" role="img" aria-label="A security seal with a fingerprint">
+            <circle cx="60" cy="60" r="46" fill="#e7f7f0" stroke="#13795b" stroke-width="4"/>
+            <path d="M43 67c0-25 34-25 34 0 0 13-5 24-13 30M50 67c0-15 20-15 20 0 0 9-3 17-8 23M57 67c0-5 6-5 6 0 0 6-1 12-4 17" fill="none" stroke="#13795b" stroke-width="5" stroke-linecap="round"/>
+            <path d="m35 45 8 8 16-18" fill="none" stroke="#2762d6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h3>SHA-256 = tamper seal</h3>
+          <p>If even one byte changes, the seal no longer matches.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="lanes-title">
+      <h2 id="lanes-title">2. Two lanes do different jobs</h2>
+      <p class="lead">The bridge is the messenger—not the moving truck.</p>
+      <div class="two-lanes">
+        <article class="lane cargo">
+          <div class="lane-icon" aria-hidden="true">🚚</div>
+          <h3>Private Git carries the heavy parcel</h3>
+          <p>The ZIP and packing slip live in one exact Git commit. SYS-B fetches that exact frozen snapshot.</p>
+        </article>
+        <article class="lane message">
+          <div class="lane-icon" aria-hidden="true">📨</div>
+          <h3>The bridge carries a tiny pickup message</h3>
+          <p>It sends the commit ID, manifest path, expected seal, action, status, and receipt.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="route-title">
+      <h2 id="route-title">3. The proposed trip</h2>
+      <p class="lead">Click “show the trip” to walk through the handoff.</p>
+      <div class="route" aria-label="Transfer route from SYS-A through Git and the bridge to SYS-B">
+        <div class="stop" data-step="0"><span class="big" aria-hidden="true">🅰️</span><strong>SYS-A packs</strong><small>ZIP + manifest + hashes</small></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="stop" data-step="1"><span class="big" aria-hidden="true">🔒</span><strong>Git freezes it</strong><small>one exact commit</small></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="stop" data-step="2"><span class="big" aria-hidden="true">🅱️</span><strong>SYS-B checks</strong><small>identity, paths, counts, hashes</small></div>
+      </div>
+      <button class="pulse-button" type="button" id="trip-button">Show the trip</button>
+      <p id="trip-caption" class="lead" style="text-align:center; margin-top:14px" aria-live="polite">Nothing installs until every check passes.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="status-title">
+      <h2 id="status-title">4. Is the infrastructure built?</h2>
+      <p class="lead">Mostly—but “built locally” is not the same as “delivered end to end.”</p>
+      <div class="status-grid">
+        <article class="status done">
+          <h3>Packing and checking</h3>
+          <p>The release envelope, safe validator/installer, documentation, and 56 foundation tests are in place locally.</p>
+        </article>
+        <article class="status done">
+          <h3>Road and messenger</h3>
+          <p>The private Git remote exists. The bridge delivered the proposal message to SYS-B.</p>
+        </article>
+        <article class="status wait">
+          <h3>Actual delivery</h3>
+          <p>No commit or push yet, no SYS-B acceptance yet, and therefore no real pinned install test yet.</p>
+        </article>
+      </div>
+      <div class="status-grid" style="margin-top:16px">
+        <article class="status no">
+          <h3>Always-on automatic watcher</h3>
+          <p>There is no unattended daemon that notices and installs skill parcels by itself. An agent runs the command.</p>
+        </article>
+        <article class="status done">
+          <h3>Safe collision rule</h3>
+          <p>If a skill already exists and is identical, accept it. If it differs, stop—never silently overwrite it.</p>
+        </article>
+        <article class="status done">
+          <h3>Wrong-machine protection</h3>
+          <p>Install refuses to run unless the receiving machine identifies itself as the intended target.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="next-title">
+      <h2 id="next-title">5. What must happen next?</h2>
+      <p class="lead">Three small gates turn the local prototype into a completed transfer.</p>
+      <div class="next-grid">
+        <article class="next"><span class="number">1</span><h3>You authorize Git publishing</h3><p>Review, commit, and push the protocol and parcel.</p></article>
+        <article class="next"><span class="number">2</span><h3>SYS-B receives the pickup note</h3><p>It fetches that exact commit and validates everything.</p></article>
+        <article class="next"><span class="number">3</span><h3>SYS-B installs and sends a receipt</h3><p>Only after all checks pass; the bridge returns the result.</p></article>
+      </div>
+      <details>
+        <summary>Exact evidence from the current package</summary>
+        <ul class="facts">
+          <li>Release directory: <code>transfers/releases/2026/08/2026-08-23--sys-a-to-sys-b--codex-skills--r01/</code></li>
+          <li>Fixed files: <code>release.json</code> and <code>payload.zip</code></li>
+          <li>Seal: <code>7E5C313D66BBB8DBFF03D88E48C18BDB21CB541949D44102A0143BDC0DE3D790</code></li>
+          <li>Package: 59 payload files; 62 file entries and 2 directory entries in the ZIP.</li>
+          <li>Policy: <code>accept-identical-or-fail</code>; exact Git commit and target-system identity are mandatory.</li>
+          <li>Current Git state: local files are modified/untracked on <code>main</code>; they are not committed or pushed.</li>
+          <li>The bridge proposal was delivered, but SYS-B has not replied yet.</li>
+        </ul>
+      </details>
+    </section>
+
+    <div class="remember">What to remember: the secure delivery machinery exists locally, but the real delivery starts only after an approved commit and push.</div>
+  </main>
+
+  <script>
+    (() => {
+      const button = document.getElementById('trip-button');
+      const stops = [...document.querySelectorAll('[data-step]')];
+      const caption = document.getElementById('trip-caption');
+      const messages = [
+        'SYS-A prepares the parcel and records every file.',
+        'Git gives the parcel one exact, unchanging address.',
+        'SYS-B verifies first, installs second, and sends a receipt.'
+      ];
+      let running = false;
+
+      button.addEventListener('click', async () => {
+        if (running) return;
+        running = true;
+        button.disabled = true;
+        for (let i = 0; i < stops.length; i += 1) {
+          stops.forEach((stop, index) => stop.classList.toggle('active', index === i));
+          caption.textContent = messages[i];
+          await new Promise(resolve => window.setTimeout(resolve, 850));
+        }
+        stops.forEach(stop => stop.classList.remove('active'));
+        caption.textContent = 'Nothing installs until every check passes.';
+        button.disabled = false;
+        running = false;
+      });
+    })();
+  </script>
+</body>
+</html>

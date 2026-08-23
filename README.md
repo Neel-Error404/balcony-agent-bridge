@@ -61,6 +61,12 @@ shutdown terminates the active child tree.
 
 Git remains the transfer mechanism for code, skills, and documents. Dispatcher
 messages carry instructions and project keys, not local paths or files.
+Reviewed binary skill packages use the Git-pinned release envelope documented
+in `docs/runbooks/git-artifact-handoff.md`; bridge messages carry only the full
+commit, manifest path, archive SHA-256, requested action, and acknowledgement.
+Every package is isolated under the canonical dated path
+`transfers/releases/YYYY/MM/<release-id>/` with fixed filenames `release.json`
+and `payload.zip`.
 
 ## High-Level Coordination API
 

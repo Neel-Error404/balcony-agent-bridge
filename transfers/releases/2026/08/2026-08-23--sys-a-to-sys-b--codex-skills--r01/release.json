@@ -1,0 +1,72 @@
+{
+  "schema_version": "balcony-artifact-release.v1",
+  "handoff_protocol": "balcony-git-artifact-handoff.v1",
+  "release_id": "2026-08-23--sys-a-to-sys-b--codex-skills--r01",
+  "release_date_utc": "2026-08-23",
+  "artifact_type": "codex-skill-archive",
+  "origin_system": "SYS-A",
+  "target_system": "SYS-B",
+  "created_at_utc": "2026-08-23T06:04:14.9338267Z",
+  "archive": {
+    "file_name": "payload.zip",
+    "sha256": "7E5C313D66BBB8DBFF03D88E48C18BDB21CB541949D44102A0143BDC0DE3D790",
+    "byte_length": 120586,
+    "payload_root": "sys-a-to-sys-b-skills-2026-08-23",
+    "zip_entry_count": 64,
+    "file_entry_count": 62,
+    "directory_entry_count": 2,
+    "payload_file_count": 59,
+    "uncompressed_byte_length": 245248,
+    "max_file_byte_length": 12988,
+    "metadata_files": [
+      "README.md",
+      "MANIFEST.md",
+      "SHA256SUMS.txt"
+    ]
+  },
+  "skills": {
+    "codex": [
+      "architecture-review-html",
+      "conduct-research",
+      "eli5",
+      "linear",
+      "onboard-new-user",
+      "orchestrate",
+      "preserve-authentic-ai-voice",
+      "repo-agent-contract",
+      "stay-on-track",
+      "symphony-controller",
+      "symphony-setup",
+      "to-issues",
+      "tracker-setup",
+      "triage-agent-brief",
+      "vercel-deploy",
+      "voiceai-release-readiness",
+      "write-impactful-articles",
+      "writing-great-skills"
+    ],
+    "agents": [
+      "architecture-review-html",
+      "conduct-research",
+      "preserve-authentic-ai-voice",
+      "repo-agent-contract",
+      "to-issues",
+      "triage-agent-brief",
+      "write-impactful-articles",
+      "writing-great-skills"
+    ]
+  },
+  "install_policy": {
+    "collision": "accept-identical-or-fail",
+    "require_git_commit_pin": true,
+    "require_target_system_identity": true
+  },
+  "declared_name_exceptions": [
+    {
+      "surface": "codex",
+      "directory": "onboard-new-user",
+      "declared_name": "setup-codex",
+      "reason": "preserved-source-mismatch"
+    }
+  ]
+}
