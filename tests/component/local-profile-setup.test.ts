@@ -31,6 +31,9 @@ describe("local profile setup", () => {
         'args = ["C:\\\\runtime\\\\dist\\\\mcp\\\\index.js","--config",',
       );
       expect(first.mcpRegistration).toContain(JSON.stringify(profilePath));
+      expect(first.mcpRegistration).toContain(
+        'env = { BALCONY_SYSTEM_ID = "node-a" }',
+      );
       expect(first.mcpRegistration).not.toContain("servicebus");
       expect(loadConfigFile(profilePath).systemId).toBe("node-a");
       expect(fs.existsSync(databasePath)).toBe(true);

@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BridgeConfig } from "../../src/config.js";
 import { runDoctor } from "../../src/cli/doctor.js";
+import { BridgeDatabase } from "../../src/storage/database.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -49,8 +50,8 @@ describe("bridge doctor", () => {
     expect(JSON.stringify(report)).not.toContain("local-node");
   });
 
-  it("fails safely when the existing database does not have schema migration five", async () => {
-    const databasePath = createHealthyDatabase({ includeMigrationFive: false });
+  it("fails safely when the existing database does not have the signed-ingress migration", async () => {
+    const databasePath = createHealthyDatabase({ includeSignedIngressMigration: false });
     const report = await runDoctor({
       loadConfig: () => config(databasePath),
       nodeVersion: "v22.0.0",
@@ -65,6 +66,79 @@ describe("bridge doctor", () => {
       code: "DATABASE_SCHEMA_UNSUPPORTED",
     });
     expect(JSON.stringify(report)).not.toContain(databasePath);
+  });
+
+  it("rejects a current migration marker on an incomplete schema", async () => {
+    const databasePath = createIncompleteDatabase();
+    const report = await runDoctor({
+      loadConfig: () => config(databasePath),
+      nodeVersion: "v22.0.0",
+      runtimeFiles: [databasePath],
+    });
+
+    expect(report.checks).toContainEqual({
+      name: "database",
+      status: "fail",
+      code: "DATABASE_SCHEMA_UNSUPPORTED",
+    });
+  });
+
+  it("rejects a database created by a newer runtime", async () => {
+    const databasePath = createHealthyDatabase();
+    const database = new Database(databasePath);
+    try {
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (8, ?)",
+        )
+        .run("2026-08-25T00:00:00.000Z");
+    } finally {
+      database.close();
+    }
+
+    const report = await runDoctor({
+      loadConfig: () => config(databasePath),
+      nodeVersion: "v22.0.0",
+      runtimeFiles: [databasePath],
+    });
+
+    expect(report.checks).toContainEqual({
+      name: "database",
+      status: "fail",
+      code: "DATABASE_SCHEMA_UNSUPPORTED",
+    });
+  });
+
+  it("checks every packaged runtime entrypoint by default", async () => {
+    const databasePath = createHealthyDatabase();
+    const checkedPaths: string[] = [];
+    const originalExistsSync = fs.existsSync;
+    const existsSync = vi.spyOn(fs, "existsSync").mockImplementation((file) => {
+      const candidate = String(file);
+      checkedPaths.push(candidate);
+      return candidate.endsWith(path.join("dispatcher", "index.ts"))
+        ? false
+        : originalExistsSync(file);
+    });
+    try {
+      const report = await runDoctor({
+        loadConfig: () => config(databasePath),
+        nodeVersion: "v22.0.0",
+      });
+
+      expect(report.checks).toContainEqual({
+        name: "runtime_build",
+        status: "fail",
+        code: "PACKAGE_RUNTIME_UNSUPPORTED",
+      });
+      for (const entrypoint of ["cli", "bridge", "mcp", "dispatcher"]) {
+        expect(checkedPaths).toContainEqual(
+          expect.stringContaining(path.join(entrypoint, "index.ts")),
+        );
+      }
+    } finally {
+      existsSync.mockRestore();
+    }
   });
 
   it("fails requested transport checks without configuration and does not invoke a probe", async () => {
@@ -168,8 +242,27 @@ function config(databasePath: string, serviceBusNamespace?: string): BridgeConfi
   };
 }
 
-function createHealthyDatabase(options: { includeMigrationFive?: boolean } = {}): string {
+function createHealthyDatabase(
+  options: { includeSignedIngressMigration?: boolean } = {},
+): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-doctor-"));
+  temporaryDirectories.push(root);
+  const databasePath = path.join(root, "bridge.sqlite3");
+  const bridgeDatabase = new BridgeDatabase(databasePath);
+  bridgeDatabase.close();
+  if (options.includeSignedIngressMigration === false) {
+    const database = new Database(databasePath);
+    try {
+      database.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
+    } finally {
+      database.close();
+    }
+  }
+  return databasePath;
+}
+
+function createIncompleteDatabase(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-doctor-incomplete-"));
   temporaryDirectories.push(root);
   const databasePath = path.join(root, "bridge.sqlite3");
   const database = new Database(databasePath);
@@ -177,7 +270,9 @@ function createHealthyDatabase(options: { includeMigrationFive?: boolean } = {})
     database.exec(`
       CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL);
       INSERT INTO schema_migrations (version, applied_at_utc) VALUES (1, '2026-08-25T00:00:00.000Z');
-      ${options.includeMigrationFive === false ? "" : "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (5, '2026-08-25T00:00:00.000Z');"}
+      INSERT INTO schema_migrations (version, applied_at_utc) VALUES (5, '2026-08-25T00:00:00.000Z');
+      INSERT INTO schema_migrations (version, applied_at_utc) VALUES (6, '2026-08-25T00:00:00.000Z');
+      INSERT INTO schema_migrations (version, applied_at_utc) VALUES (7, '2026-08-25T00:00:00.000Z');
       CREATE TABLE outbox (message_id TEXT PRIMARY KEY);
       CREATE TABLE inbox (message_id TEXT PRIMARY KEY);
       CREATE TABLE delivery_attempts (attempt_id TEXT PRIMARY KEY);

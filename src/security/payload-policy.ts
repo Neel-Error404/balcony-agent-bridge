@@ -7,7 +7,7 @@ const FORBIDDEN_VALUE_PATTERNS: ReadonlyArray<{
 }> = [
   {
     label: "private key block",
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
+    pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/i,
   },
   {
     label: "Azure Storage connection string",
@@ -22,8 +22,37 @@ const FORBIDDEN_VALUE_PATTERNS: ReadonlyArray<{
     pattern: /\bBearer\s+[A-Za-z0-9\-._~+/]+=*/i,
   },
   {
+    label: "AWS access key",
+    pattern: /\bAKIA[A-Z0-9]{16}\b/,
+  },
+  {
     label: "GitHub token",
     pattern: /\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b/i,
+  },
+  {
+    label: "OpenAI API key",
+    pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/i,
+  },
+  {
+    label: "Slack token",
+    pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/i,
+  },
+  {
+    label: "npm token",
+    pattern: /\bnpm_[A-Za-z0-9]{30,}\b/i,
+  },
+  {
+    label: "client secret assignment",
+    pattern:
+      /(?:^|[^A-Za-z0-9_])["']?(?:AZURE_CLIENT_SECRET|client[_-]?secret)["']?\s*[:=]\s*["']?[A-Za-z0-9._~-]{16,}/i,
+  },
+  {
+    label: "SAS signature",
+    pattern: /[?&]sig=[A-Za-z0-9%+/=]{16,}(?:&|$)/i,
+  },
+  {
+    label: "credentialed URL",
+    pattern: /https?:\/\/[^\s/:@]+:[^\s/@]+@[^\s/]+/i,
   },
 ];
 

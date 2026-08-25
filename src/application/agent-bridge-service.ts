@@ -2,6 +2,7 @@ import {
   MESSAGE_KINDS,
   SystemIdSchema,
   createEnvelope,
+  type BridgeEnvelope,
   type MessageKind,
   type MessagePayload,
   type SystemId,
@@ -11,7 +12,10 @@ import {
   type CoordinationIntent,
 } from "../contracts/coordination.js";
 import type { BridgeConfig } from "../config.js";
-import { StateTransitionError } from "../errors.js";
+import {
+  IdempotencyConflictError,
+  StateTransitionError,
+} from "../errors.js";
 import {
   BridgeDatabase,
   type AcknowledgeOutcome,
@@ -93,7 +97,10 @@ export class AgentBridgeService {
       expiresAtUtc,
       ...(input.now ? { now: input.now } : {}),
     });
-    const result = this.database.enqueueEnvelope(envelope);
+    const result = this.database.enqueueEnvelope(envelope, {
+      matchConversationId: input.conversationId !== undefined,
+      matchExpiresAtUtc: input.expiresAtUtc !== undefined,
+    });
     const authoritative = this.database.getOutboxMessage(result.messageId);
     if (!authoritative) {
       throw new StateTransitionError(
@@ -111,8 +118,21 @@ export class AgentBridgeService {
   }
 
   public askAgent(input: AskAgentInput) {
+    const targetNodeId = this.requireAuthorizedRemoteNode(input.targetNodeId);
+    const existingRequest = this.database.getOutboxByIdempotency(
+      targetNodeId,
+      input.idempotencyKey,
+    );
     if (
       input.conversationId &&
+      existingRequest &&
+      existingRequest.envelope.conversation_id !== input.conversationId
+    ) {
+      throw new IdempotencyConflictError(input.idempotencyKey);
+    }
+    if (
+      input.conversationId &&
+      !existingRequest &&
       this.database.listConversation(input.conversationId, 1).length > 0
     ) {
       throw new StateTransitionError(
@@ -121,7 +141,7 @@ export class AgentBridgeService {
     }
     const request = this.send({
       idempotencyKey: input.idempotencyKey,
-      targetNodeId: input.targetNodeId,
+      targetNodeId,
       kind: "task_request",
       streamId: "agent-coordination",
       payload: {
@@ -168,6 +188,8 @@ export class AgentBridgeService {
       previous?.envelope.payload.coordination_result;
     if (
       !previous ||
+      !["available", "processed"].includes(previous.state) ||
+      !previous.authenticatedIngress ||
       previous.envelope.kind !== "task_result" ||
       !this.config.authorizedNodeIds.includes(previous.envelope.origin_system) ||
       !resultMetadata ||
@@ -198,6 +220,7 @@ export class AgentBridgeService {
     const thread = this.database.listConversation(
       previous.envelope.conversation_id,
       100,
+      [this.config.systemId, previous.envelope.origin_system],
     );
     const existingFollowUp = this.database.getOutboxByIdempotency(
       previous.envelope.origin_system,
@@ -282,23 +305,19 @@ export class AgentBridgeService {
     conversationId: string,
     limit: number,
   ): Record<string, unknown> {
-    const completeThread = this.database.listConversation(
+    const initialRequest = this.database.findInitialCoordinationRequest(
       conversationId,
-      100,
+      this.config.systemId,
     );
-    const ownsThread = completeThread.some(
-      (item) =>
-        item.direction === "outbound" &&
-        item.envelope.kind === "task_request" &&
-        item.envelope.stream_id === "agent-coordination" &&
-        Boolean(item.envelope.payload.coordination_request),
-    );
-    if (!ownsThread) {
+    if (!initialRequest) {
       throw new StateTransitionError(
         `Coordination thread '${conversationId}' does not exist`,
       );
     }
-    const items = completeThread.slice(-limit);
+    const items = this.database.listConversation(conversationId, limit, [
+      this.config.systemId,
+      initialRequest.envelope.target_system,
+    ]);
     return {
       conversation_id: conversationId,
       count: items.length,
@@ -583,4 +602,20 @@ export class AgentBridgeService {
     }
     return parsed.data;
   }
+}
+
+function belongsToCoordinationRoute(
+  envelope: BridgeEnvelope,
+  localSystemId: SystemId,
+  peerSystemId: SystemId,
+): boolean {
+  if (envelope.stream_id !== "agent-coordination") {
+    return false;
+  }
+  return (
+    (envelope.origin_system === localSystemId &&
+      envelope.target_system === peerSystemId) ||
+    (envelope.origin_system === peerSystemId &&
+      envelope.target_system === localSystemId)
+  );
 }

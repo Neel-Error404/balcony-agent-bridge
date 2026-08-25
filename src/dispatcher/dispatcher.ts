@@ -139,6 +139,7 @@ export class ReadOnlyDispatcher {
           this.database.listConversation(
             claim.envelope.conversation_id,
             20,
+            [claim.envelope.origin_system, claim.envelope.target_system],
           ),
           claim.envelope,
         );
@@ -338,6 +339,7 @@ function buildThreadHistory(
   const candidates = items.filter(
     (item) =>
       item.envelope.message_id !== current.message_id &&
+      belongsToRoute(item.envelope, current) &&
       item.envelope.stream_id === "agent-coordination" &&
       Boolean(
         item.envelope.payload.coordination_request ||
@@ -372,6 +374,18 @@ function buildThreadHistory(
     remaining -= label.length + body.length + 2;
   }
   return lines.join("\n\n");
+}
+
+function belongsToRoute(
+  candidate: BridgeEnvelope,
+  current: BridgeEnvelope,
+): boolean {
+  return (
+    (candidate.origin_system === current.origin_system &&
+      candidate.target_system === current.target_system) ||
+    (candidate.origin_system === current.target_system &&
+      candidate.target_system === current.origin_system)
+  );
 }
 
 function failureMessage(code: string): string {

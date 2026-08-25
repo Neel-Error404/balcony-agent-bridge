@@ -35,6 +35,8 @@ export type InboxState =
   | "rejected"
   | "quarantined";
 
+export const CURRENT_SCHEMA_VERSION = 7;
+
 interface OutboxRow {
   message_id: string;
   envelope_json: string;
@@ -52,12 +54,18 @@ interface InboxRow {
   claim_owner: string | null;
   claim_token_hash: string | null;
   claim_until_utc: string | null;
+  authenticated_ingress?: number;
 }
 
 export interface EnqueueResult {
   messageId: string;
   state: OutboxState;
   duplicate: boolean;
+}
+
+interface IdempotencyComparisonOptions {
+  matchConversationId?: boolean;
+  matchExpiresAtUtc?: boolean;
 }
 
 export interface LeasedOutboxMessage {
@@ -86,6 +94,7 @@ export interface ClaimedInboxMessage {
 export interface InboxListItem {
   envelope: BridgeEnvelope;
   state: InboxState;
+  authenticatedIngress: boolean;
   claimOwner?: string;
   claimUntilUtc?: string;
 }
@@ -149,18 +158,25 @@ export class BridgeDatabase {
     }
 
     this.database = new Database(databasePath);
-    this.database.pragma("busy_timeout = 5000");
-    this.database.pragma("journal_mode = WAL");
-    this.database.pragma("foreign_keys = ON");
-    this.database.pragma("synchronous = FULL");
-    this.migrate();
+    try {
+      this.assertSupportedSchemaVersion();
+      this.database.pragma("busy_timeout = 5000");
+      this.database.pragma("journal_mode = WAL");
+      this.database.pragma("foreign_keys = ON");
+      this.database.pragma("synchronous = FULL");
+      this.migrate();
+    } catch (error) {
+      this.database.close();
+      throw error;
+    }
   }
 
   public getInboxMessage(messageId: string): InboxListItem | undefined {
     const row = this.database
       .prepare(
         `SELECT message_id, envelope_json, payload_sha256, state,
-                claim_owner, claim_token_hash, claim_until_utc
+                claim_owner, claim_token_hash, claim_until_utc,
+                authenticated_ingress
          FROM inbox WHERE message_id = ?`,
       )
       .get(messageId) as InboxRow | undefined;
@@ -170,6 +186,7 @@ export class BridgeDatabase {
     return {
       envelope: parseEnvelope(JSON.parse(row.envelope_json)),
       state: row.state,
+      authenticatedIngress: row.authenticated_ingress === 1,
       ...(row.claim_owner ? { claimOwner: row.claim_owner } : {}),
       ...(row.claim_until_utc ? { claimUntilUtc: row.claim_until_utc } : {}),
     };
@@ -218,6 +235,7 @@ export class BridgeDatabase {
   public listConversation(
     conversationId: string,
     limit = 20,
+    route?: readonly [SystemId, SystemId],
   ): ConversationListItem[] {
     assertPositiveInteger(limit, "limit");
     if (limit > 100) {
@@ -237,13 +255,14 @@ export class BridgeDatabase {
       .prepare(
         `SELECT envelope_json, state
          FROM inbox
-         WHERE json_extract(envelope_json, '$.conversation_id') = ?`,
+         WHERE json_extract(envelope_json, '$.conversation_id') = ?
+           AND authenticated_ingress = 1`,
       )
       .all(conversationId) as Array<{
       envelope_json: string;
       state: InboxState;
     }>;
-    return [
+    const items = [
       ...outbound.map((row) => ({
         envelope: parseEnvelope(JSON.parse(row.envelope_json)),
         direction: "outbound" as const,
@@ -254,8 +273,7 @@ export class BridgeDatabase {
         direction: "inbound" as const,
         state: row.state,
       })),
-    ]
-      .sort((left, right) => {
+    ].sort((left, right) => {
         const leftSequence =
           left.envelope.sequence_number ?? Number.MAX_SAFE_INTEGER;
         const rightSequence =
@@ -267,8 +285,47 @@ export class BridgeDatabase {
           ) ||
           left.envelope.message_id.localeCompare(right.envelope.message_id)
         );
-      })
+      });
+    return items
+      .filter(
+        (item) =>
+          !route ||
+          sameConversationRoute(item.envelope, route[0], route[1]),
+      )
       .slice(-limit);
+  }
+
+  public findInitialCoordinationRequest(
+    conversationId: string,
+    originSystem: SystemId,
+  ): ConversationListItem | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT envelope_json, state
+         FROM outbox
+         WHERE json_extract(envelope_json, '$.conversation_id') = ?
+           AND json_extract(envelope_json, '$.origin_system') = ?
+           AND kind = 'task_request'
+           AND stream_id = 'agent-coordination'
+           AND json_extract(envelope_json, '$.payload.coordination_request') IS NOT NULL
+         ORDER BY COALESCE(
+                    json_extract(envelope_json, '$.sequence_number'),
+                    9223372036854775807
+                  ),
+                  created_at_utc,
+                  message_id
+         LIMIT 1`,
+      )
+      .get(conversationId, originSystem) as
+      | { envelope_json: string; state: OutboxState }
+      | undefined;
+    return row
+      ? {
+          envelope: parseEnvelope(JSON.parse(row.envelope_json)),
+          direction: "outbound",
+          state: row.state,
+        }
+      : undefined;
   }
 
   public findInboxReplyTo(
@@ -280,7 +337,8 @@ export class BridgeDatabase {
     const row = this.database
       .prepare(
         `SELECT message_id, envelope_json, payload_sha256, state,
-                claim_owner, claim_token_hash, claim_until_utc
+                claim_owner, claim_token_hash, claim_until_utc,
+                authenticated_ingress
          FROM inbox
          WHERE causation_id = ?
            AND kind = 'task_result'
@@ -302,6 +360,7 @@ export class BridgeDatabase {
     return {
       envelope: parseEnvelope(JSON.parse(row.envelope_json)),
       state: row.state,
+      authenticatedIngress: row.authenticated_ingress === 1,
       ...(row.claim_owner ? { claimOwner: row.claim_owner } : {}),
       ...(row.claim_until_utc ? { claimUntilUtc: row.claim_until_utc } : {}),
     };
@@ -414,17 +473,51 @@ export class BridgeDatabase {
     return updated;
   }
 
-  public enqueueEnvelope(envelopeValue: unknown): EnqueueResult {
+  public enqueueEnvelope(
+    envelopeValue: unknown,
+    comparison: IdempotencyComparisonOptions = {},
+  ): EnqueueResult {
     const envelope = parseEnvelope(envelopeValue);
     const transaction = this.database.transaction(() =>
-      this.enqueueEnvelopeRow(envelope),
+      this.enqueueEnvelopeRow(envelope, comparison),
     );
-    return transaction();
+    return transaction.immediate();
   }
 
   private enqueueEnvelopeRow(
     envelope: BridgeEnvelope,
+    comparison: IdempotencyComparisonOptions = {},
   ): EnqueueResult {
+    if (
+      envelope.kind === "task_request" &&
+      envelope.stream_id === "agent-coordination" &&
+      envelope.sequence_number === 0 &&
+      envelope.payload.coordination_request
+    ) {
+      const existingRoot = this.database
+        .prepare(
+          `SELECT target_system, idempotency_key
+           FROM outbox
+           WHERE json_extract(envelope_json, '$.conversation_id') = ?
+             AND kind = 'task_request'
+             AND stream_id = 'agent-coordination'
+             AND json_extract(envelope_json, '$.sequence_number') = 0
+             AND json_extract(envelope_json, '$.payload.coordination_request') IS NOT NULL
+           LIMIT 1`,
+        )
+        .get(envelope.conversation_id) as
+        | { target_system: string; idempotency_key: string }
+        | undefined;
+      if (
+        existingRoot &&
+        (existingRoot.target_system !== envelope.target_system ||
+          existingRoot.idempotency_key !== envelope.idempotency_key)
+      ) {
+        throw new StateTransitionError(
+          "A coordination conversation already has a different root request",
+        );
+      }
+    }
     const insert = this.database
       .prepare(
         `INSERT OR IGNORE INTO outbox (
@@ -469,7 +562,7 @@ export class BridgeDatabase {
 
     if (existing) {
       const prior = existing.envelope;
-      if (!sameIdempotentOperation(prior, envelope)) {
+      if (!sameIdempotentOperation(prior, envelope, comparison)) {
         throw new IdempotencyConflictError(envelope.idempotency_key);
       }
       return {
@@ -838,6 +931,7 @@ export class BridgeDatabase {
     envelopeValue: unknown,
     brokerDeliveryCount: number,
     now = new Date(),
+    authenticatedIngress = false,
   ): PersistIncomingResult {
     const envelope = parseEnvelope(envelopeValue);
     const nowUtc = now.toISOString();
@@ -846,7 +940,8 @@ export class BridgeDatabase {
       const existing = this.database
         .prepare(
           `SELECT message_id, envelope_json, payload_sha256, state,
-                  claim_owner, claim_token_hash, claim_until_utc
+                  claim_owner, claim_token_hash, claim_until_utc,
+                  authenticated_ingress
            FROM inbox WHERE message_id = ?`,
         )
         .get(envelope.message_id) as InboxRow | undefined;
@@ -855,10 +950,19 @@ export class BridgeDatabase {
         const existingEnvelope = parseEnvelope(
           JSON.parse(existing.envelope_json) as unknown,
         );
-        if (existingEnvelope.origin_system !== envelope.origin_system) {
-          return { status: "collision", messageId: envelope.message_id };
-        }
-        if (existing.payload_sha256 !== envelope.payload_sha256) {
+        const sameOrigin =
+          existingEnvelope.origin_system === envelope.origin_system;
+        const collisionReason = !sameInboundMessage(
+          existingEnvelope,
+          envelope,
+        )
+          ? !sameOrigin
+            ? "Message identity collision: origin system changed"
+            : existing.payload_sha256 !== envelope.payload_sha256
+              ? "Message identity collision: payload hash changed"
+              : "Message identity collision: signed envelope metadata changed"
+          : undefined;
+        if (collisionReason && sameOrigin) {
           this.database
             .prepare(
               `UPDATE inbox
@@ -871,9 +975,15 @@ export class BridgeDatabase {
             .run(
               nowUtc,
               brokerDeliveryCount,
-              "Message identity collision: payload hash changed",
+              collisionReason,
               envelope.message_id,
             );
+          return { status: "collision", messageId: envelope.message_id };
+        }
+        if (collisionReason) {
+          // The caller dead-letters this conflicting delivery. Do not let one
+          // authenticated peer quarantine another peer's accepted message by
+          // copying its public identifier.
           return { status: "collision", messageId: envelope.message_id };
         }
 
@@ -881,10 +991,16 @@ export class BridgeDatabase {
           .prepare(
             `UPDATE inbox
              SET last_received_at_utc = ?,
-                 broker_delivery_count = MAX(broker_delivery_count, ?)
-             WHERE message_id = ?`,
+                  broker_delivery_count = MAX(broker_delivery_count, ?),
+                  authenticated_ingress = MAX(authenticated_ingress, ?)
+              WHERE message_id = ?`,
           )
-          .run(nowUtc, brokerDeliveryCount, envelope.message_id);
+          .run(
+            nowUtc,
+            brokerDeliveryCount,
+            authenticatedIngress ? 1 : 0,
+            envelope.message_id,
+          );
         return { status: "duplicate", messageId: envelope.message_id };
       }
 
@@ -902,8 +1018,9 @@ export class BridgeDatabase {
             attempt_count,
             first_received_at_utc,
             last_received_at_utc,
-            broker_delivery_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'available', 0, ?, ?, ?)`,
+            broker_delivery_count,
+            authenticated_ingress
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'available', 0, ?, ?, ?, ?)`,
         )
         .run(
           envelope.message_id,
@@ -916,6 +1033,7 @@ export class BridgeDatabase {
           nowUtc,
           nowUtc,
           brokerDeliveryCount,
+          authenticatedIngress ? 1 : 0,
         );
       return { status: "inserted", messageId: envelope.message_id };
     });
@@ -936,7 +1054,8 @@ export class BridgeDatabase {
     const rows = this.database
       .prepare(
         `SELECT message_id, envelope_json, payload_sha256, state,
-                claim_owner, claim_token_hash, claim_until_utc
+                claim_owner, claim_token_hash, claim_until_utc,
+                authenticated_ingress
          FROM inbox
          WHERE state IN (${placeholders})
          ORDER BY first_received_at_utc, message_id
@@ -947,6 +1066,7 @@ export class BridgeDatabase {
     return rows.map((row) => ({
       envelope: parseEnvelope(JSON.parse(row.envelope_json)),
       state: row.state,
+      authenticatedIngress: row.authenticated_ingress === 1,
       ...(row.claim_owner ? { claimOwner: row.claim_owner } : {}),
       ...(row.claim_until_utc ? { claimUntilUtc: row.claim_until_utc } : {}),
     }));
@@ -1778,6 +1898,70 @@ export class BridgeDatabase {
         `);
     });
     genericNodeMigration.immediate();
+
+    const signedIngressMigration = this.database.transaction(() => {
+      const alreadyApplied = this.database
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = 6")
+        .get();
+      if (alreadyApplied) {
+        return;
+      }
+      this.database
+        .prepare(
+          `UPDATE inbox
+           SET state = 'quarantined',
+               claim_owner = NULL,
+               claim_token_hash = NULL,
+               claim_until_utc = NULL,
+               last_error = ?
+           WHERE state IN ('available', 'claimed')`,
+        )
+        .run("Pending inbox quarantined during signed-message migration");
+      this.database
+        .prepare(
+          `INSERT INTO schema_migrations (version, applied_at_utc)
+           VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+        )
+        .run();
+    });
+    signedIngressMigration.immediate();
+
+    const ingressProvenanceMigration = this.database.transaction(() => {
+      const alreadyApplied = this.database
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = 7")
+        .get();
+      if (alreadyApplied) {
+        return;
+      }
+      this.database.exec(`
+        ALTER TABLE inbox
+          ADD COLUMN authenticated_ingress INTEGER NOT NULL DEFAULT 0
+          CHECK (authenticated_ingress IN (0, 1));
+
+        INSERT INTO schema_migrations (version, applied_at_utc)
+        VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      `);
+    });
+    ingressProvenanceMigration.immediate();
+  }
+
+  private assertSupportedSchemaVersion(): void {
+    const migrationTableExists = this.database
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+      )
+      .get();
+    if (!migrationTableExists) {
+      return;
+    }
+    const row = this.database
+      .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+      .get() as { version: number | null };
+    if (row.version !== null && row.version > CURRENT_SCHEMA_VERSION) {
+      throw new StateTransitionError(
+        `Database schema version ${row.version} is newer than supported version ${CURRENT_SCHEMA_VERSION}`,
+      );
+    }
   }
 
   public claimAutonomousConsultationInbox(
@@ -1843,12 +2027,53 @@ function sameConsultationIdentity(
 function sameIdempotentOperation(
   left: BridgeEnvelope,
   right: BridgeEnvelope,
+  comparison: IdempotencyComparisonOptions,
 ): boolean {
   return (
     left.target_system === right.target_system &&
     left.kind === right.kind &&
     left.stream_id === right.stream_id &&
+    left.payload_sha256 === right.payload_sha256 &&
+    left.correlation_id === right.correlation_id &&
+    left.causation_id === right.causation_id &&
+    left.sequence_number === right.sequence_number &&
+    (!comparison.matchConversationId ||
+      left.conversation_id === right.conversation_id) &&
+    (!comparison.matchExpiresAtUtc ||
+      left.expires_at_utc === right.expires_at_utc)
+  );
+}
+
+function sameInboundMessage(
+  left: BridgeEnvelope,
+  right: BridgeEnvelope,
+): boolean {
+  return (
+    left.schema_version === right.schema_version &&
+    left.message_id === right.message_id &&
+    left.idempotency_key === right.idempotency_key &&
+    left.origin_system === right.origin_system &&
+    left.target_system === right.target_system &&
+    left.kind === right.kind &&
+    left.conversation_id === right.conversation_id &&
+    left.correlation_id === right.correlation_id &&
+    left.causation_id === right.causation_id &&
+    left.stream_id === right.stream_id &&
+    left.sequence_number === right.sequence_number &&
+    left.created_at_utc === right.created_at_utc &&
+    left.expires_at_utc === right.expires_at_utc &&
     left.payload_sha256 === right.payload_sha256
+  );
+}
+
+function sameConversationRoute(
+  envelope: BridgeEnvelope,
+  first: SystemId,
+  second: SystemId,
+): boolean {
+  return (
+    (envelope.origin_system === first && envelope.target_system === second) ||
+    (envelope.origin_system === second && envelope.target_system === first)
   );
 }
 

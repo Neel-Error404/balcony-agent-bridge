@@ -104,7 +104,7 @@ describe("ReadOnlyDispatcher", () => {
 
   it("fails closed when worker output violates message safety policy", async () => {
     executor.result = {
-      output: "-----BEGIN PRIVATE KEY-----",
+      output: ["-----BEGIN ", "PRIVATE KEY-----"].join(""),
     };
     database.persistIncoming(incomingEnvelope("unsafe-output", true), 1);
 
@@ -152,6 +152,69 @@ describe("ReadOnlyDispatcher", () => {
     expect(await slowDispatcher.runOnce()).toBe(1);
     expect(renewal).toHaveBeenCalled();
     expect(database.getStatus().inbox.processed).toBe(1);
+  });
+
+  it("excludes another peer's messages from coordination context", async () => {
+    const conversationId = "2b444356-1f5b-4a62-a756-cf02e21e5670";
+    const unrelatedRequestId = "d64b60dc-ab98-451e-a8b4-b8330e92ea16";
+    database.persistIncoming(
+      createEnvelope({
+        idempotencyKey: "third-peer-result",
+        originSystem: "node-c",
+        targetSystem: "SYS-B",
+        kind: "task_result",
+        conversationId,
+        causationId: unrelatedRequestId,
+        streamId: "agent-coordination",
+        sequenceNumber: 1,
+        payload: {
+          subject: "Unrelated peer result",
+          body: "CONFIDENTIAL_NODE_C_CONTEXT",
+          project: "voiceai",
+          evidence: [],
+          coordination_result: {
+            protocol_version: "1.0",
+            request_message_id: unrelatedRequestId,
+            outcome: "completed",
+          },
+        },
+      }),
+      1,
+    );
+    database.persistIncoming(
+      createEnvelope({
+        idempotencyKey: "current-coordination-request",
+        originSystem: "SYS-A",
+        targetSystem: "SYS-B",
+        kind: "task_request",
+        conversationId,
+        streamId: "agent-coordination",
+        sequenceNumber: 2,
+        payload: {
+          subject: "Inspect project",
+          body: "Report branch and test status.",
+          project: "voiceai",
+          evidence: [],
+          dispatch: {
+            executor: "codex_cli",
+            access: "read_only",
+            timeout_seconds: 120,
+          },
+          coordination_request: {
+            protocol_version: "1.0",
+            intent: "inspect",
+            access_mode: "read_only",
+          },
+        },
+      }),
+      1,
+    );
+
+    expect(await dispatcher.runOnce()).toBe(1);
+    expect(executor.inputs).toHaveLength(1);
+    expect(executor.inputs[0]?.prompt).not.toContain(
+      "CONFIDENTIAL_NODE_C_CONTEXT",
+    );
   });
 
   it("cancels the worker and preserves the claim when renewal fails", async () => {

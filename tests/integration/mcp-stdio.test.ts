@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -104,7 +105,10 @@ describe("MCP stdio process", () => {
         configPath,
       ],
       cwd: repositoryRoot,
-      env: inheritedEnvironment,
+      env: {
+        ...inheritedEnvironment,
+        BALCONY_SYSTEM_ID: "node-a",
+      },
       stderr: "pipe",
     });
     const client = new Client({
@@ -123,5 +127,48 @@ describe("MCP stdio process", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("rejects an explicit local profile that does not match the process identity", () => {
+    const temporaryDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-agent-bridge-profile-mismatch-"),
+    );
+    temporaryDirectories.push(temporaryDirectory);
+    const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+    const configPath = path.join(temporaryDirectory, "config.json");
+    setupLocalProfile({
+      configPath,
+      databasePath: path.join(temporaryDirectory, "bridge.sqlite3"),
+      nodeId: "node-a",
+      authorizedNodeIds: ["node-b"],
+    });
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(repositoryRoot, "src", "mcp", "index.ts"),
+        "--config",
+        configPath,
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          BALCONY_SYSTEM_ID: "node-b",
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trim()).toBe(
+      "Balcony Agent Bridge MCP startup failed (CONFIGURATION_ERROR)",
+    );
+    expect(result.stderr).not.toContain(configPath);
+    expect(result.stderr).not.toContain("node-a");
+    expect(result.stderr).not.toContain("node-b");
   });
 });

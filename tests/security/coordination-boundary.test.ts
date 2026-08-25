@@ -52,7 +52,7 @@ describe("coordination security boundary", () => {
         target_node_id: "SYS-B",
         project_id: "voiceai",
         subject: "Unsafe inspection",
-        request: "Inspect this: -----BEGIN PRIVATE KEY-----",
+        request: ["Inspect this: -----BEGIN ", "PRIVATE KEY-----"].join(""),
       },
     });
 
@@ -188,7 +188,7 @@ describe("coordination security boundary", () => {
         },
       },
     });
-    database.persistIncoming(mismatchedResult, 1);
+    database.persistIncoming(mismatchedResult, 1, new Date(), true);
 
     const response = await client.callTool({
       name: "agent_bridge_continue_agent",

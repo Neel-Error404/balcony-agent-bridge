@@ -40,6 +40,9 @@ describe("database migration concurrency", () => {
           "result_message_id",
           "result_payload_sha256",
         ]);
+        expect(columns.map((column) => column.name)).toContain(
+          "authenticated_ingress",
+        );
         const tableSql = database
           .prepare(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN ('inbox', 'outbox')",
@@ -50,7 +53,7 @@ describe("database migration concurrency", () => {
         );
         const migration = database
           .prepare(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 5",
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 7",
           )
           .get() as { count: number };
         expect(migration.count).toBe(1);

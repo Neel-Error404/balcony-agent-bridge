@@ -160,7 +160,10 @@ describe("bridge envelope", () => {
         streamId: "unsafe",
         payload: {
           subject: "Unsafe",
-          body: "Endpoint=sb://example/;SharedAccessKeyName=owner;SharedAccessKey=value",
+          body: [
+            "Endpoint=sb://example/;SharedAccessKeyName=owner;",
+            "SharedAccessKey=value",
+          ].join(""),
           evidence: [],
         },
       }),

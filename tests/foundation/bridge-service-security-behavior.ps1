@@ -34,7 +34,36 @@ function Set-RestrictedTestDirectoryAcl {
     Set-Acl -LiteralPath $Path -AclObject $directoryAcl
 }
 
+function Set-RestrictedTestFileAcl {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)]
+        [Security.Principal.SecurityIdentifier[]] $TrustedIdentities,
+        [Security.AccessControl.FileSystemAccessRule[]] $AdditionalRules = @()
+    )
+
+    $fileAcl = [Security.AccessControl.FileSecurity]::new()
+    $fileAcl.SetOwner($TrustedIdentities[0])
+    $fileAcl.SetAccessRuleProtection($true, $false)
+    foreach ($trustedIdentity in $TrustedIdentities) {
+        $fileAcl.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $trustedIdentity,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+        )
+    }
+    foreach ($additionalRule in $AdditionalRules) {
+        $fileAcl.AddAccessRule($additionalRule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $fileAcl
+}
+
 $temporaryFile = [IO.Path]::GetTempFileName()
+$withoutSystemReadFile = [IO.Path]::GetTempFileName()
+$deniedSystemReadFile = [IO.Path]::GetTempFileName()
+$deniedServiceReadFile = [IO.Path]::GetTempFileName()
 $temporaryRoot = Join-Path $env:ProgramData (
     "balcony-acl-{0}" -f [guid]::NewGuid().ToString("N")
 )
@@ -94,6 +123,64 @@ try {
         $administratorsSid.Value,
         "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
     )
+
+    Set-RestrictedTestFileAcl `
+        -Path $withoutSystemReadFile `
+        -TrustedIdentities @($currentIdentity, $administratorsSid)
+    try {
+        Assert-BridgeServiceCredentialAcl `
+            -Path $withoutSystemReadFile `
+            -TrustedSids $runtimeTrustedSids
+        throw "Credential without LocalSystem read access was accepted."
+    }
+    catch {
+        if ($_.Exception.Message -ne "Credential ACL validation failed.") {
+            throw
+        }
+    }
+
+    $denyEveryoneReadRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $everyone,
+        [Security.AccessControl.FileSystemRights]::ReadData,
+        [Security.AccessControl.AccessControlType]::Deny
+    )
+    Set-RestrictedTestFileAcl `
+        -Path $deniedSystemReadFile `
+        -TrustedIdentities $trustedIdentities `
+        -AdditionalRules $denyEveryoneReadRule
+    try {
+        Assert-BridgeServiceCredentialAcl `
+            -Path $deniedSystemReadFile `
+            -TrustedSids $runtimeTrustedSids
+        throw "Credential with denied LocalSystem read access was accepted."
+    }
+    catch {
+        if ($_.Exception.Message -ne "Credential ACL validation failed.") {
+            throw
+        }
+    }
+
+    $serviceSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-6")
+    $denyServiceReadRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $serviceSid,
+        [Security.AccessControl.FileSystemRights]::ReadData,
+        [Security.AccessControl.AccessControlType]::Deny
+    )
+    Set-RestrictedTestFileAcl `
+        -Path $deniedServiceReadFile `
+        -TrustedIdentities $trustedIdentities `
+        -AdditionalRules $denyServiceReadRule
+    try {
+        Assert-BridgeServiceCredentialAcl `
+            -Path $deniedServiceReadFile `
+            -TrustedSids $runtimeTrustedSids
+        throw "Credential denied to the service SID was accepted."
+    }
+    catch {
+        if ($_.Exception.Message -ne "Credential ACL validation failed.") {
+            throw
+        }
+    }
 
     $ancestorCreateRule = [Security.AccessControl.FileSystemAccessRule]::new(
         $everyone,
@@ -182,6 +269,9 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $temporaryFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $withoutSystemReadFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $deniedSystemReadFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $deniedServiceReadFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $protectedLeaf -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $unsafeLeaf -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporaryRoot -Force -ErrorAction SilentlyContinue

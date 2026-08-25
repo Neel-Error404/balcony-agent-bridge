@@ -2,3 +2,4 @@
 # Prefer the exact absolute registration printed by `balcony-agent-bridge setup`.
 command = "C:\\path\\to\\node.exe"
 args = ["C:\\path\\to\\balcony-agent-bridge\\dist\\mcp\\index.js", "--config", "C:\\path\\to\\agent-bridge\\config.json"]
+env = { BALCONY_SYSTEM_ID = "node-a" }

@@ -58,8 +58,19 @@ revocation.
 Database schema version 5 rebuilds the inbox and outbox tables without the
 legacy two-node `CHECK` constraints. The migration is transactional, copies
 every existing column, recreates dispatch and claim indexes, and records its
-marker only after the replacement tables are in place. Pending, leased,
-available, processed, and duplicate-suppression state is preserved.
+marker only after the replacement tables are in place.
+
+Schema version 6 is the signed-ingress cutover boundary. It preserves outbox
+state, processed inbox evidence, and duplicate-suppression rows, but
+quarantines any inbox row that was still `available` or `claimed` before the
+signed transport was installed. Those rows predate authenticated ingress and
+must not become executable merely because the new runtime opened the existing
+database. Review quarantined work explicitly; do not change it back to
+`available` without verifying its origin outside the bridge.
+
+Schema version 7 records whether each inbox row arrived through authenticated
+signed ingress. Existing rows default to unauthenticated, including processed
+legacy results, and therefore cannot authorize a new coordination continuation.
 
 ## Static Azure Topology
 

@@ -68,6 +68,7 @@ export function setupLocalProfile(
   });
   const mcpRegistration = renderMcpRegistration(
     configPath,
+    profile.nodeId,
     input.mcpCommand,
     input.mcpCommandArgs,
   );
@@ -207,6 +208,7 @@ function profilesEqual(
 
 function renderMcpRegistration(
   configPath: string,
+  nodeId: SystemId,
   command = "balcony-agent-bridge-mcp",
   commandArgs: readonly string[] = [],
 ): string {
@@ -214,6 +216,7 @@ function renderMcpRegistration(
     "[mcp_servers.balcony-agent-bridge]",
     `command = ${JSON.stringify(command)}`,
     `args = ${JSON.stringify([...commandArgs, "--config", configPath])}`,
+    `env = { BALCONY_SYSTEM_ID = ${JSON.stringify(nodeId)} }`,
     "",
   ].join("\n");
 }

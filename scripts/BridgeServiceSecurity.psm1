@@ -38,20 +38,45 @@ function Assert-BridgeServiceCredentialAcl {
             throw "Credential ACL validation failed."
         }
         $anyFileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl
+        $requiredReadRights = [Security.AccessControl.FileSystemRights]::Read
+        $localSystemSid = "S-1-5-18"
+        $localSystemTokenSids = @(
+            "S-1-1-0",
+            "S-1-5-6",
+            "S-1-5-11",
+            $localSystemSid,
+            "S-1-5-32-544"
+        )
+        $hasLocalSystemRead = $false
         foreach ($rule in $acl.Access) {
-            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
-                continue
-            }
             if (-not (Test-BridgeServiceAccessRuleAppliesToItem -Rule $rule)) {
                 continue
             }
             $sid = ConvertTo-BridgeServiceSid -IdentityReference $rule.IdentityReference
             if (
+                $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny -and
+                $localSystemTokenSids -contains $sid -and
+                (($rule.FileSystemRights -band $requiredReadRights) -ne 0)
+            ) {
+                throw "Credential ACL validation failed."
+            }
+            if (
+                $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
                 $TrustedSids -notcontains $sid -and
                 (($rule.FileSystemRights -band $anyFileSystemRights) -ne 0)
             ) {
                 throw "Credential ACL validation failed."
             }
+            if (
+                $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+                $sid -eq $localSystemSid -and
+                (($rule.FileSystemRights -band $requiredReadRights) -eq $requiredReadRights)
+            ) {
+                $hasLocalSystemRead = $true
+            }
+        }
+        if (-not $hasLocalSystemRead) {
+            throw "Credential ACL validation failed."
         }
     }
     catch {

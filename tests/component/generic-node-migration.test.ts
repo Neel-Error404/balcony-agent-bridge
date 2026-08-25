@@ -9,7 +9,55 @@ import { createEnvelope, type BridgeEnvelope } from "../../src/contracts/envelop
 import { BridgeDatabase } from "../../src/storage/database.js";
 
 describe("generic node database migration", () => {
-  it("preserves queued legacy rows and removes the closed node constraints", () => {
+  it("refuses to open a database from a newer schema version", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-future-schema-"));
+    const databasePath = path.join(root, "bridge.sqlite3");
+    const current = new BridgeDatabase(databasePath);
+    current.close();
+    const database = new Database(databasePath);
+    try {
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (8, ?)",
+        )
+        .run("2026-08-25T00:00:00.000Z");
+    } finally {
+      database.close();
+    }
+
+    expect(() => new BridgeDatabase(databasePath)).toThrow(
+      "newer than supported version 7",
+    );
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("marks processed legacy inbox rows as unauthenticated evidence", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-legacy-ingress-"));
+    const databasePath = path.join(root, "bridge.sqlite3");
+    const outgoing = envelope("legacy-outgoing", "SYS-A", "SYS-B");
+    const incoming = envelope("legacy-incoming", "SYS-B", "SYS-A");
+    createLegacyVersionFourDatabase(databasePath, outgoing, incoming);
+    const legacy = new Database(databasePath);
+    try {
+      legacy.prepare("UPDATE inbox SET state = 'processed'").run();
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new BridgeDatabase(databasePath);
+    try {
+      expect(migrated.getInboxMessage(incoming.message_id)).toMatchObject({
+        state: "processed",
+        authenticatedIngress: false,
+      });
+      expect(migrated.listConversation(incoming.conversation_id, 20)).toEqual([]);
+    } finally {
+      migrated.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves queued outbound work, quarantines legacy inbound work, and removes closed node constraints", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-node-migration-"));
     const databasePath = path.join(root, "bridge.sqlite3");
     const outgoing = envelope("legacy-outgoing", "SYS-A", "SYS-B");
@@ -40,7 +88,10 @@ describe("generic node database migration", () => {
           undefined,
           new Date("2026-08-26T00:00:00.000Z"),
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
+      expect(migrated.getInboxMessage(incoming.message_id)?.state).toBe(
+        "quarantined",
+      );
 
       migrated.enqueueEnvelope(
         envelope("generic-outgoing", "review-node-01", "review-node-03"),
@@ -62,9 +113,13 @@ describe("generic node database migration", () => {
       );
 
       const migration = inspected
-        .prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 5")
+        .prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 7")
         .get() as { count: number };
       expect(migration.count).toBe(1);
+      const authenticatedIngress = inspected
+        .prepare("SELECT authenticated_ingress FROM inbox WHERE message_id = ?")
+        .get(incoming.message_id) as { authenticated_ingress: number };
+      expect(authenticatedIngress.authenticated_ingress).toBe(0);
 
       const indexes = inspected
         .prepare(

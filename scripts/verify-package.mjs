@@ -11,6 +11,21 @@ const repositoryRoot = path.resolve(
 const installCheck = process.argv.includes("--install");
 const cleanCache = process.argv.includes("--clean-cache");
 const npmCli = process.env.npm_execpath;
+const prepareIdentityDirectoryScript = String.raw`
+$ErrorActionPreference = "Stop"
+$directory = $env:BALCONY_TEST_IDENTITY_DIRECTORY
+New-Item -ItemType Directory -Force -Path $directory | Out-Null
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$grants = @(
+  "*$($currentSid):(OI)(CI)F",
+  "*S-1-5-18:(OI)(CI)F",
+  "*S-1-5-32-544:(OI)(CI)F"
+)
+& icacls.exe $directory /inheritance:r /grant:r $grants | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to restrict package-verification identity directory."
+}
+`;
 
 if (cleanCache && !installCheck) {
   throw new Error("--clean-cache requires --install");
@@ -126,6 +141,7 @@ function runInstallSmoke(useCleanCache) {
   const temporaryDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), "balcony-agent-bridge-package-"),
   );
+  let identityDirectory;
   try {
     const packed = runNpm(
       [
@@ -209,7 +225,8 @@ function runInstallSmoke(useCleanCache) {
       throw new Error("npm exec did not resolve the installed local CLI");
     }
 
-    const identityDirectory = path.join(temporaryDirectory, "identity");
+    identityDirectory = createPackageIdentityDirectory();
+    prepareIdentityDirectory(identityDirectory);
     const identity = runInstalledCli(
       cliBin,
       [
@@ -369,6 +386,14 @@ function runInstallSmoke(useCleanCache) {
     requireExit(invalid, 2, "packaged CLI invalid-command check");
     return packedManifest;
   } finally {
+    if (identityDirectory) {
+      fs.rmSync(identityDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
     fs.rmSync(temporaryDirectory, {
       recursive: true,
       force: true,
@@ -376,6 +401,14 @@ function runInstallSmoke(useCleanCache) {
       retryDelay: 100,
     });
   }
+}
+
+function createPackageIdentityDirectory() {
+  const parent = process.platform === "win32" ? process.env.ProgramData : os.tmpdir();
+  if (!parent || !path.isAbsolute(parent)) {
+    throw new Error("A secure package-verification identity parent is unavailable");
+  }
+  return fs.mkdtempSync(path.join(parent, "balcony-agent-bridge-identity-"));
 }
 
 function assertSamePackageManifest(expected, actual) {
@@ -394,11 +427,15 @@ function assertSamePackageManifest(expected, actual) {
 function verifyGeneratedMcpRegistration(registration, temporaryDirectory) {
   const commandMatch = registration.match(/^command = (.+)$/mu);
   const argsMatch = registration.match(/^args = (.+)$/mu);
-  if (!commandMatch || !argsMatch) {
+  const systemIdMatch = registration.match(
+    /^env = \{ BALCONY_SYSTEM_ID = (.+) \}$/mu,
+  );
+  if (!commandMatch || !argsMatch || !systemIdMatch) {
     throw new Error("Generated MCP registration is incomplete");
   }
   const command = JSON.parse(commandMatch[1]);
   const args = JSON.parse(argsMatch[1]);
+  const systemId = JSON.parse(systemIdMatch[1]);
   const neutralDirectory = path.join(temporaryDirectory, "neutral-cwd");
   fs.mkdirSync(neutralDirectory);
   const input = [
@@ -432,6 +469,10 @@ function verifyGeneratedMcpRegistration(registration, temporaryDirectory) {
     input,
     windowsHide: true,
     timeout: 10_000,
+    env: {
+      ...process.env,
+      BALCONY_SYSTEM_ID: systemId,
+    },
   });
   requireExit(result, 0, "generated MCP registration");
   if (
@@ -458,6 +499,40 @@ function runInstalledCli(binPath, args, cwd, options = {}) {
     encoding: "utf8",
     ...options,
   });
+}
+
+function prepareIdentityDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    return;
+  }
+  const systemRoot = process.env.SystemRoot;
+  if (!systemRoot || !path.isAbsolute(systemRoot)) {
+    throw new Error("Windows SystemRoot is unavailable for package verification");
+  }
+  const powershellPath = path.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const result = spawnSync(
+    powershellPath,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(prepareIdentityDirectoryScript, "utf16le").toString("base64"),
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, BALCONY_TEST_IDENTITY_DIRECTORY: directory },
+      windowsHide: true,
+    },
+  );
+  requireExit(result, 0, "restricted identity-directory preparation");
 }
 
 function verifyPackagedReadmeLinks(packagedFiles) {

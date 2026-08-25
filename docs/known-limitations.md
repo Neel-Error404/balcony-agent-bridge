@@ -26,8 +26,10 @@ the smaller static design.
 - `doctor --check-transport` proves only that a sender link can be opened. A
   real peer is required for end-to-end delivery validation.
 - Upgrade and rollback are operator-run. Database migrations are forward-only,
-  downgrade after schema-v5 generic-node state is unsupported, and there is no
-  automatic package updater.
+  downgrade after schema-v7 signed-ingress provenance is unsupported, and there is
+  no automatic package updater. Schema v6 quarantines pending legacy inbox
+  work; schema v7 marks all remaining legacy inbox rows as unauthenticated so
+  they cannot authorize new continuation work.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
   it is accepted for the local Phase 5 gate but is not evidence from a separate
   clean OS/VM. Public-registry installation remains owner-gated.

@@ -1,16 +1,14 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createSecureIdentityDirectory } from "../helpers/windows-identity-directory.js";
+
 describe("node identity CLI", () => {
   it("creates one private identity and a shareable public enrollment entry", () => {
-    const temporaryRoot = fs.mkdtempSync(
-      path.join(os.tmpdir(), "bridge-identity-cli-"),
-    );
-    const outputDirectory = path.join(temporaryRoot, "node-a");
+    const outputDirectory = createSecureIdentityDirectory("bridge-identity-cli-");
     try {
       const result = spawnSync(
         process.execPath,
@@ -66,10 +64,11 @@ describe("node identity CLI", () => {
       );
       expect(retry.status).toBe(1);
       expect(retry.stdout).toBe("");
+      expect(retry.stderr).toContain("IDENTITY_OUTPUT_EXISTS");
       expect(retry.stderr).not.toContain(outputDirectory);
       expect(retry.stderr).not.toContain("PRIVATE KEY");
     } finally {
-      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+      fs.rmSync(outputDirectory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 });

@@ -188,6 +188,8 @@ export class BridgeWorker {
       persisted = this.database.persistIncoming(
         envelope,
         delivery.deliveryCount,
+        new Date(),
+        true,
       );
     } catch (error) {
       try {

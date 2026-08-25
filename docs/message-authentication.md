@@ -32,6 +32,13 @@ balcony-agent-bridge identity `
   --output-directory $identityRoot
 ```
 
+On Windows, the command also validates the directory immediately before it
+writes the key. It rejects a missing directory, inherited or broad access, an
+untrusted owner, and reparse points or replace-capable access anywhere in the
+ancestor path. The command does not repair ACLs automatically; prepare and
+review the directory first. On non-Windows systems, a missing absolute output
+directory is created with owner-only mode.
+
 The command refuses to overwrite an existing identity. It creates:
 
 - `node-identity.pkcs8.pem`: the private signing key; keep it on that node;
@@ -110,7 +117,11 @@ network already running an older release:
 
 1. Generate every node identity and exchange the public enrollment entries.
 2. Build and independently review every node's complete membership policy.
-3. Drain or explicitly account for the existing broker backlog.
+3. Drain or explicitly account for the existing broker backlog. On first
+   startup, schema version 6 quarantines locally pending pre-cutover inbox rows
+   because their origin was not authenticated by the signed transport. Schema
+   version 7 also records authenticated ingress on new rows and prevents
+   retained legacy results from authorizing new continuation work.
 4. Stop all bridge services while leaving MCP and SQLite state intact.
 5. Install the same signed-wire release and authentication configuration on
    every node.

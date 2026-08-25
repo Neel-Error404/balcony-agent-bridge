@@ -132,7 +132,7 @@ describe("MCP server", () => {
       },
       now: new Date("2026-08-13T12:00:00.000Z"),
     });
-    database.persistIncoming(result, 1);
+    database.persistIncoming(result, 1, new Date(), true);
 
     const completed = toolOutput(
       await client.callTool({
@@ -378,7 +378,7 @@ describe("MCP server", () => {
         stream_id: "mcp-test",
         payload: {
           subject: "Unsafe",
-          body: "-----BEGIN PRIVATE KEY-----",
+          body: ["-----BEGIN ", "PRIVATE KEY-----"].join(""),
           evidence: [],
         },
       },

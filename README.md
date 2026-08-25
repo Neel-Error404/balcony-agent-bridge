@@ -82,7 +82,7 @@ proves Azure connectivity.
 ## Configure A Node
 
 Choose one stable lowercase node ID and the complete list of remote nodes this
-machine may contact. Setup creates a private local JSON profile plus a v5
+machine may contact. Setup creates a private local JSON profile plus a v7
 SQLite database:
 
 ```powershell
@@ -235,8 +235,10 @@ owner-defined replacement procedure:
    old and new public keys active until every node has cut over.
 
 The current database migration is automatic and forward-only. Test recovery
-on a copy before upgrading an important node. The repository does not provide
-an automatic package updater or an automatic production rollback.
+on a copy before upgrading an important node. The signed-ingress migration
+preserves outbound and completed history but quarantines pending legacy inbox
+work for explicit review. The repository does not provide an automatic package
+updater or an automatic production rollback.
 
 ## Recover
 

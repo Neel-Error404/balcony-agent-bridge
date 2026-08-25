@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { ServiceBusClient } from "@azure/service-bus";
 
 import { loadConfig, requireServiceBusNamespace, type BridgeConfig } from "../config.js";
+import { CURRENT_SCHEMA_VERSION } from "../storage/database.js";
 import { createServiceBusCredential } from "../transport/service-bus-transport.js";
 
 const REQUIRED_TABLES = [
@@ -21,6 +22,77 @@ const REQUIRED_INDEXES = [
   "idx_inbox_claim",
   "idx_inbox_causation",
 ] as const;
+const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readonly string[]>> = {
+  schema_migrations: ["version", "applied_at_utc"],
+  outbox: [
+    "message_id",
+    "idempotency_key",
+    "target_system",
+    "kind",
+    "stream_id",
+    "payload_sha256",
+    "envelope_json",
+    "state",
+    "attempt_count",
+    "next_attempt_at_utc",
+    "lease_owner",
+    "lease_until_utc",
+    "created_at_utc",
+    "expires_at_utc",
+    "sent_at_utc",
+    "last_error_code",
+    "last_error",
+  ],
+  inbox: [
+    "message_id",
+    "origin_system",
+    "kind",
+    "stream_id",
+    "causation_id",
+    "payload_sha256",
+    "envelope_json",
+    "state",
+    "claim_owner",
+    "claim_token_hash",
+    "claim_until_utc",
+    "attempt_count",
+    "first_received_at_utc",
+    "last_received_at_utc",
+    "broker_delivery_count",
+    "processed_at_utc",
+    "last_error",
+    "result_message_id",
+    "result_idempotency_key",
+    "result_payload_sha256",
+    "authenticated_ingress",
+  ],
+  delivery_attempts: [
+    "attempt_id",
+    "direction",
+    "message_id",
+    "attempt_number",
+    "started_at_utc",
+    "finished_at_utc",
+    "outcome",
+    "error_code",
+    "error_detail",
+  ],
+  runtime_state: [
+    "component",
+    "instance_id",
+    "status",
+    "heartbeat_at_utc",
+    "last_error",
+  ],
+  consultation_runs: [
+    "request_message_id",
+    "state",
+    "version",
+    "run_json",
+    "created_at_utc",
+    "updated_at_utc",
+  ],
+};
 const TRANSPORT_TIMEOUT_MS = 10_000;
 
 export type DoctorCheckStatus = "pass" | "fail" | "skipped";
@@ -153,9 +225,14 @@ function inspectRuntime(
 
 function defaultRuntimeFiles(): readonly string[] {
   const modulePath = fileURLToPath(import.meta.url);
+  const extension = path.extname(modulePath);
+  const runtimeRoot = path.resolve(path.dirname(modulePath), "..");
   return [
     modulePath,
-    path.join(path.dirname(modulePath), `index${path.extname(modulePath)}`),
+    path.join(runtimeRoot, "cli", `index${extension}`),
+    path.join(runtimeRoot, "bridge", `index${extension}`),
+    path.join(runtimeRoot, "mcp", `index${extension}`),
+    path.join(runtimeRoot, "dispatcher", `index${extension}`),
   ];
 }
 
@@ -195,11 +272,24 @@ function inspectDatabase(databasePath: string): DoctorCheck {
     const tables = sqliteObjects(database, "table");
     const indexes = sqliteObjects(database, "index");
     const hasSchema = REQUIRED_TABLES.every((name) => tables.has(name)) &&
-      REQUIRED_INDEXES.every((name) => indexes.has(name));
+      REQUIRED_INDEXES.every((name) => indexes.has(name)) &&
+      REQUIRED_TABLES.every((name) =>
+        hasRequiredColumns(database!, name, REQUIRED_COLUMNS[name]),
+      );
     const migration = database
-      .prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 5")
-      .get() as { count: number };
-    if (!hasSchema || migration.count !== 1) {
+      .prepare(
+        "SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations WHERE version <= ?",
+      )
+      .get(CURRENT_SCHEMA_VERSION) as { count: number; maximum: number | null };
+    const maximum = database
+      .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+      .get() as { version: number | null };
+    if (
+      !hasSchema ||
+      migration.count !== CURRENT_SCHEMA_VERSION ||
+      migration.maximum !== CURRENT_SCHEMA_VERSION ||
+      maximum.version !== CURRENT_SCHEMA_VERSION
+    ) {
       return { name: "database", status: "fail", code: "DATABASE_SCHEMA_UNSUPPORTED" };
     }
     return { name: "database", status: "pass" };
@@ -211,6 +301,18 @@ function inspectDatabase(databasePath: string): DoctorCheck {
   } finally {
     database?.close();
   }
+}
+
+function hasRequiredColumns(
+  database: Database.Database,
+  table: (typeof REQUIRED_TABLES)[number],
+  requiredColumns: readonly string[],
+): boolean {
+  const rows = database
+    .prepare(`PRAGMA table_info("${table}")`)
+    .all() as Array<{ name: string }>;
+  const columns = new Set(rows.map((row) => row.name));
+  return requiredColumns.every((column) => columns.has(column));
 }
 
 function sqliteObjects(database: Database.Database, type: "table" | "index"): Set<string> {
