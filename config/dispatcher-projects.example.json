@@ -3,7 +3,7 @@
   "projects": [
     {
       "key": "balcony-agent-bridge",
-      "path": "D:\\replace-with-local-project-path",
+      "path": "C:\\path\\to\\project",
       "enabled": true,
       "peer_readable": true,
       "evidence": {

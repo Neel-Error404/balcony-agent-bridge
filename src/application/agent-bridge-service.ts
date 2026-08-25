@@ -1,8 +1,10 @@
 import {
   MESSAGE_KINDS,
+  SystemIdSchema,
   createEnvelope,
   type MessageKind,
   type MessagePayload,
+  type SystemId,
 } from "../contracts/envelope.js";
 import {
   COORDINATION_PROTOCOL_VERSION,
@@ -18,6 +20,7 @@ import {
 
 export interface SendMessageInput {
   idempotencyKey: string;
+  targetNodeId: SystemId;
   kind: MessageKind;
   streamId: string;
   payload: MessagePayload;
@@ -38,6 +41,7 @@ export interface ClaimInboxInput {
 
 export interface AskAgentInput {
   idempotencyKey: string;
+  targetNodeId: SystemId;
   projectId: string;
   subject: string;
   request: string;
@@ -65,13 +69,14 @@ export class AgentBridgeService {
   ) {}
 
   public send(input: SendMessageInput) {
+    const targetNodeId = this.requireAuthorizedRemoteNode(input.targetNodeId);
     const expiresAtUtc =
       input.expiresAtUtc ??
       new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const envelope = createEnvelope({
       idempotencyKey: input.idempotencyKey,
       originSystem: this.config.systemId,
-      targetSystem: this.config.peerSystemId,
+      targetSystem: targetNodeId,
       kind: input.kind,
       streamId: input.streamId,
       payload: input.payload,
@@ -116,6 +121,7 @@ export class AgentBridgeService {
     }
     const request = this.send({
       idempotencyKey: input.idempotencyKey,
+      targetNodeId: input.targetNodeId,
       kind: "task_request",
       streamId: "agent-coordination",
       payload: {
@@ -163,7 +169,7 @@ export class AgentBridgeService {
     if (
       !previous ||
       previous.envelope.kind !== "task_result" ||
-      previous.envelope.origin_system !== this.config.peerSystemId ||
+      !this.config.authorizedNodeIds.includes(previous.envelope.origin_system) ||
       !resultMetadata ||
       resultMetadata.outcome !== "completed"
     ) {
@@ -179,6 +185,8 @@ export class AgentBridgeService {
       !priorRequest ||
       priorRequest.envelope.kind !== "task_request" ||
       !priorRequest.envelope.payload.coordination_request ||
+      priorRequest.envelope.origin_system !== this.config.systemId ||
+      priorRequest.envelope.target_system !== previous.envelope.origin_system ||
       priorRequest.envelope.conversation_id !==
         previous.envelope.conversation_id ||
       !projectId
@@ -192,7 +200,7 @@ export class AgentBridgeService {
       100,
     );
     const existingFollowUp = this.database.getOutboxByIdempotency(
-      this.config.peerSystemId,
+      previous.envelope.origin_system,
       input.idempotencyKey,
     );
     const latest = thread.at(-1)?.envelope;
@@ -225,6 +233,7 @@ export class AgentBridgeService {
         1;
     const followUp = this.send({
       idempotencyKey: input.idempotencyKey,
+      targetNodeId: previous.envelope.origin_system,
       kind: "task_request",
       streamId: "agent-coordination",
       conversationId: previous.envelope.conversation_id,
@@ -324,8 +333,22 @@ export class AgentBridgeService {
       );
     }
 
-    const reply = this.database.findInboxReplyTo(taskId);
+    const reply = this.database.findInboxReplyTo(
+      taskId,
+      request.envelope.target_system,
+      this.config.systemId,
+      request.envelope.conversation_id,
+    );
     if (reply) {
+      if (
+        reply.envelope.origin_system !== request.envelope.target_system ||
+        reply.envelope.target_system !== this.config.systemId ||
+        reply.envelope.conversation_id !== request.envelope.conversation_id
+      ) {
+        throw new StateTransitionError(
+          `Coordination task '${taskId}' has a result from an unexpected route`,
+        );
+      }
       const metadata = reply.envelope.payload.coordination_result;
       const outcome =
         reply.state === "quarantined"
@@ -517,16 +540,14 @@ export class AgentBridgeService {
         `Cannot reply because inbox message '${originalMessageId}' does not exist`,
       );
     }
-    if (original.envelope.origin_system !== this.config.peerSystemId) {
-      throw new StateTransitionError(
-        `Cannot reply to message '${originalMessageId}' because its origin is not the configured peer`,
-      );
-    }
+    const targetNodeId = this.requireAuthorizedRemoteNode(
+      original.envelope.origin_system,
+    );
 
     return createEnvelope({
       idempotencyKey,
       originSystem: this.config.systemId,
-      targetSystem: this.config.peerSystemId,
+      targetSystem: targetNodeId,
       kind: kind,
       streamId: original.envelope.stream_id,
       conversationId: original.envelope.conversation_id,
@@ -546,9 +567,20 @@ export class AgentBridgeService {
   public status(): Record<string, unknown> {
     return {
       system_id: this.config.systemId,
-      peer_system_id: this.config.peerSystemId,
+      authorized_node_ids: [...this.config.authorizedNodeIds],
       allowed_message_kinds: MESSAGE_KINDS,
       ...this.database.getStatus(),
     };
+  }
+
+  private requireAuthorizedRemoteNode(value: string): SystemId {
+    const parsed = SystemIdSchema.safeParse(value);
+    if (!parsed.success || parsed.data === this.config.systemId) {
+      throw new StateTransitionError(`Target node '${value}' is not authorized`);
+    }
+    if (!this.config.authorizedNodeIds.includes(parsed.data)) {
+      throw new StateTransitionError(`Target node '${value}' is not authorized`);
+    }
+    return parsed.data;
   }
 }

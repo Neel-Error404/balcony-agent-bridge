@@ -33,6 +33,23 @@ export class BridgeWorker {
     );
     for (const item of leased) {
       const startedAtUtc = new Date().toISOString();
+      if (!this.config.authorizedNodeIds.includes(item.envelope.target_system)) {
+        this.database.quarantineOutbox(
+          item.envelope.message_id,
+          this.instanceId,
+          "UnauthorizedTargetNode",
+        );
+        this.database.recordDeliveryAttempt({
+          direction: "outbound",
+          messageId: item.envelope.message_id,
+          attemptNumber: item.attemptNumber,
+          startedAtUtc,
+          finishedAtUtc: new Date().toISOString(),
+          outcome: "quarantined",
+          errorCode: "UnauthorizedTargetNode",
+        });
+        continue;
+      }
       try {
         await this.transport.send(item.envelope);
         const finishedAtUtc = new Date().toISOString();
@@ -131,6 +148,20 @@ export class BridgeWorker {
         startedAtUtc,
         "dead-lettered",
         "WrongTargetSystem",
+      );
+      return;
+    }
+    if (!this.config.authorizedNodeIds.includes(envelope.origin_system)) {
+      await delivery.deadLetter(
+        "UnauthorizedOriginNode",
+        "Message origin is not authorized by this bridge",
+      );
+      this.recordInboundAttempt(
+        delivery,
+        envelope.message_id,
+        startedAtUtc,
+        "dead-lettered",
+        "UnauthorizedOriginNode",
       );
       return;
     }

@@ -16,7 +16,7 @@ describe("BridgeWorker", () => {
     transport = new FakeBridgeTransport();
     const config: BridgeConfig = {
       systemId: "SYS-A",
-      peerSystemId: "SYS-B",
+      authorizedNodeIds: ["SYS-B", "node-c"],
       databasePath: ":memory:",
       topicName: "agent-messages",
       subscriptionName: "sys-a",
@@ -69,6 +69,16 @@ describe("BridgeWorker", () => {
     expect(database.getStatus().outbox.quarantined).toBe(1);
   });
 
+  it("quarantines queued work whose target is no longer authorized", async () => {
+    const outgoing = envelope("SYS-A", "node-d", "removed-node");
+    database.enqueueEnvelope(outgoing);
+
+    await worker.runOutboundOnce(new Date("2026-08-13T12:00:00.000Z"));
+
+    expect(transport.sent).toHaveLength(0);
+    expect(database.getStatus().outbox.quarantined).toBe(1);
+  });
+
   it("persists inbound messages before completing delivery", async () => {
     const incoming = envelope("SYS-B", "SYS-A", "inbound");
     transport.queueInbound({
@@ -117,11 +127,28 @@ describe("BridgeWorker", () => {
       "EnvelopeValidationFailed",
     );
   });
+
+  it("dead-letters a message from an unknown origin before persistence", async () => {
+    const unknownOrigin = envelope("node-d", "SYS-A", "unknown-origin");
+    transport.queueInbound({
+      body: unknownOrigin,
+      brokerMessageId: unknownOrigin.message_id,
+      sessionId: unknownOrigin.conversation_id,
+    });
+
+    await worker.runInboundOnce();
+
+    expect(transport.inbound[0]!.settlement).toBe("dead-lettered");
+    expect(transport.inbound[0]!.deadLetterReason).toBe(
+      "UnauthorizedOriginNode",
+    );
+    expect(database.getStatus().inbox.available).toBe(0);
+  });
 });
 
 function envelope(
-  originSystem: "SYS-A" | "SYS-B",
-  targetSystem: "SYS-A" | "SYS-B",
+  originSystem: string,
+  targetSystem: string,
   idempotencyKey: string,
 ) {
   return createEnvelope({

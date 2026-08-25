@@ -13,7 +13,7 @@ describe("AgentBridgeService", () => {
     database = new BridgeDatabase(":memory:");
     const config: BridgeConfig = {
       systemId: "SYS-A",
-      peerSystemId: "SYS-B",
+      authorizedNodeIds: ["SYS-B", "node-c"],
       databasePath: ":memory:",
       topicName: "agent-messages",
       subscriptionName: "sys-a",
@@ -24,9 +24,10 @@ describe("AgentBridgeService", () => {
 
   afterEach(() => database.close());
 
-  it("derives origin and target from trusted local configuration", () => {
+  it("uses an explicit authorized target from trusted local configuration", () => {
     const result = service.send({
       idempotencyKey: "send-1",
+      targetNodeId: "node-c",
       kind: "message",
       streamId: "service-test",
       payload: {
@@ -38,6 +39,26 @@ describe("AgentBridgeService", () => {
 
     expect(result.accepted).toBe(true);
     expect(database.getStatus().outbox.pending).toBe(1);
+    expect(database.getOutboxMessage(result.message_id)?.envelope.target_system).toBe(
+      "node-c",
+    );
+  });
+
+  it("rejects an unknown target before persisting it", () => {
+    expect(() =>
+      service.send({
+        idempotencyKey: "unknown-target",
+        targetNodeId: "node-d",
+        kind: "message",
+        streamId: "service-test",
+        payload: {
+          subject: "Hello",
+          body: "This route is not authorized.",
+          evidence: [],
+        },
+      }),
+    ).toThrow(/not authorized/);
+    expect(database.getStatus().outbox.pending).toBe(0);
   });
 
   it("lists metadata without returning message bodies", () => {
@@ -76,6 +97,7 @@ describe("AgentBridgeService", () => {
   it("creates idempotent coordination tasks and returns their result", () => {
     const first = service.askAgent({
       idempotencyKey: "ask-agent-1",
+      targetNodeId: "SYS-B",
       projectId: "voiceai-platform",
       subject: "Inspect VoiceAI",
       request: "Report the repository state without modifying it.",
@@ -89,6 +111,7 @@ describe("AgentBridgeService", () => {
     };
     const duplicate = service.askAgent({
       idempotencyKey: "ask-agent-1",
+      targetNodeId: "SYS-B",
       projectId: "voiceai-platform",
       subject: "Inspect VoiceAI",
       request: "Report the repository state without modifying it.",
@@ -150,6 +173,7 @@ describe("AgentBridgeService", () => {
     const conversationId = "33333333-3333-4333-8333-333333333333";
     service.send({
       idempotencyKey: "existing-conversation",
+      targetNodeId: "SYS-B",
       kind: "message",
       streamId: "manual",
       conversationId,
@@ -163,6 +187,7 @@ describe("AgentBridgeService", () => {
     expect(() =>
       service.askAgent({
         idempotencyKey: "invalid-new-turn",
+        targetNodeId: "SYS-B",
         projectId: "voiceai-platform",
         subject: "Do not fork",
         request: "This must use the continuation operation instead.",

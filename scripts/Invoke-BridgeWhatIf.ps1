@@ -13,15 +13,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($env:BALCONY_SYSTEM_ID -ne "SYS-A") {
-    throw "Azure bridge infrastructure what-if must be initiated from SYS-A."
-}
-
 foreach ($path in @($TemplateFile, $ParameterFile)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required deployment file does not exist: $path"
     }
 }
+
+& (Join-Path $PSScriptRoot "Test-BridgeTopologyParameters.ps1") `
+    -ParameterFile $ParameterFile `
+    -RequiredNodeId $env:BALCONY_SYSTEM_ID | Out-Null
 
 az deployment group what-if `
     --resource-group $ResourceGroup `

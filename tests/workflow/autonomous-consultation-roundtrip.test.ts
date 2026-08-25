@@ -81,6 +81,7 @@ describe("autonomous consultation round trip", () => {
     const base = new Date();
     const request = sysAService.askAgent({
       idempotencyKey: "workflow-autonomous-consultation",
+      targetNodeId: "SYS-B",
       projectId: "balcony-agent-bridge",
       subject: "Reconcile both bridge runtimes",
       request: "Ask the peer for its runtime state and return one answer.",
@@ -278,7 +279,7 @@ function bridgeConfig(
 ): BridgeConfig {
   return {
     systemId,
-    peerSystemId: systemId === "SYS-A" ? "SYS-B" : "SYS-A",
+    authorizedNodeIds: [systemId === "SYS-A" ? "SYS-B" : "SYS-A"],
     databasePath,
     topicName: "agent-messages",
     subscriptionName: systemId.toLowerCase(),

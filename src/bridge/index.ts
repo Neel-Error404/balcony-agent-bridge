@@ -1,4 +1,10 @@
-import { loadConfig } from "../config.js";
+#!/usr/bin/env node
+
+import {
+  loadConfig,
+  loadMessageAuthenticationRuntimeConfig,
+} from "../config.js";
+import { loadMessageAuthenticator } from "../security/message-authentication.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
 import { BridgeDatabase } from "../storage/database.js";
 import { ServiceBusBridgeTransport } from "../transport/service-bus-transport.js";
@@ -8,10 +14,20 @@ import { BridgeWorker } from "./worker.js";
 
 try {
   const config = loadConfig();
+  const messageAuthentication = loadMessageAuthenticationRuntimeConfig(
+    process.env,
+    config,
+  );
+  const authenticator = loadMessageAuthenticator({
+    localNodeId: config.systemId,
+    authorizedNodeIds: config.authorizedNodeIds,
+    membershipPath: messageAuthentication.membershipPath,
+    signingKeyPath: messageAuthentication.signingKeyPath,
+  });
   const processLock = acquireBridgeProcessLock(config.systemId);
   try {
     const database = new BridgeDatabase(config.databasePath);
-    const transport = new ServiceBusBridgeTransport(config);
+    const transport = new ServiceBusBridgeTransport(config, authenticator);
     const worker = new BridgeWorker(config, database, transport);
     const controller = new AbortController();
     process.once("SIGINT", () => controller.abort());

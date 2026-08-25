@@ -178,7 +178,7 @@ describe("autonomous consultation safety controls", () => {
     );
   });
 
-  it("rejects a peer result outside the correlated nested conversation", async () => {
+  it("ignores a peer result outside the correlated nested conversation", async () => {
     const harness = createHarness();
     const request = incomingRequest();
     harness.database.persistIncoming(request, 1, now(0));
@@ -224,8 +224,8 @@ describe("autonomous consultation safety controls", () => {
     expect(
       harness.database.getConsultationRun(request.message_id),
     ).toMatchObject({
-      state: "failed",
-      error_code: "CONSULTATION_PEER_RESULT_INVALID",
+      state: "waiting_peer",
+      nested_task_id: run.nested_task_id,
     });
   });
 
@@ -443,7 +443,7 @@ function result(value: Record<string, unknown>): CodexExecutionResult {
 function bridgeConfig(databasePath: string): BridgeConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath,
     topicName: "agent-messages",
     subscriptionName: "sys-b",

@@ -74,7 +74,6 @@ export class AutonomousConsultationCoordinator {
   private readonly policy: z.infer<typeof CoordinatorPolicySchema>;
   private readonly workingDirectory: string;
   private readonly systemId: SystemId;
-  private readonly peerSystemId: SystemId;
 
   public constructor(
     config: BridgeConfig,
@@ -91,7 +90,6 @@ export class AutonomousConsultationCoordinator {
     this.policy = CoordinatorPolicySchema.parse(policy);
     this.workingDirectory = requireDirectory(workingDirectory);
     this.systemId = config.systemId;
-    this.peerSystemId = config.peerSystemId;
   }
 
   public async runOnce(
@@ -379,6 +377,7 @@ export class AutonomousConsultationCoordinator {
       }
       const nested = this.bridgeService.send({
         idempotencyKey: `consultation-peer:${run.request_message_id}:${run.round_count}`,
+        targetNodeId: claim.envelope.origin_system,
         kind: "task_request",
         streamId: "agent-coordination",
         correlationId: run.root_request_id,
@@ -430,7 +429,22 @@ export class AutonomousConsultationCoordinator {
       return true;
     }
 
-    const reply = this.database.findInboxReplyTo(run.nested_task_id);
+    const nested = this.database.getOutboxMessage(run.nested_task_id);
+    if (!nested || nested.envelope.kind !== "task_request") {
+      this.fail(
+        run,
+        claim,
+        "CONSULTATION_PEER_RESULT_INVALID",
+        now,
+      );
+      return true;
+    }
+    const reply = this.database.findInboxReplyTo(
+      run.nested_task_id,
+      nested.envelope.target_system,
+      this.systemId,
+      nested.envelope.conversation_id,
+    );
     if (!reply) {
       const waiting = this.database.saveConsultationRun(
         {
@@ -446,13 +460,10 @@ export class AutonomousConsultationCoordinator {
       this.release(claim, waiting.state, now);
       return false;
     }
-    const nested = this.database.getOutboxMessage(run.nested_task_id);
     if (
-      !nested ||
-      nested.envelope.kind !== "task_request" ||
       nested.envelope.stream_id !== "agent-coordination" ||
       reply.state === "quarantined" ||
-      reply.envelope.origin_system !== this.peerSystemId ||
+      reply.envelope.origin_system !== nested.envelope.target_system ||
       reply.envelope.target_system !== this.systemId ||
       reply.envelope.stream_id !== "agent-coordination" ||
       reply.envelope.conversation_id !==

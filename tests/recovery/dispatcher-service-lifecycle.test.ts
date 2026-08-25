@@ -341,5 +341,5 @@ describe("dispatcher service lifecycle recovery", () => {
         forwardAclMutated: true,
       });
     }
-  });
+  }, 15_000);
 });

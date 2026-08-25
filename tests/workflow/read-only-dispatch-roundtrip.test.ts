@@ -65,6 +65,7 @@ describe("read-only dispatch round trip", () => {
     const sysAService = new AgentBridgeService(sysAConfig, sysADatabase);
     const request = sysAService.askAgent({
       idempotencyKey: "workflow-read-only-request",
+      targetNodeId: "SYS-B",
       projectId: "voiceai",
       subject: "Inspect VoiceAI",
       request: "Report the repository state without modifying it.",
@@ -256,7 +257,7 @@ function bridgeConfig(
 ): BridgeConfig {
   return {
     systemId,
-    peerSystemId: systemId === "SYS-A" ? "SYS-B" : "SYS-A",
+    authorizedNodeIds: [systemId === "SYS-A" ? "SYS-B" : "SYS-A"],
     databasePath,
     topicName: "agent-messages",
     subscriptionName: systemId.toLowerCase(),
@@ -270,7 +271,7 @@ function dispatcherConfig(
 ): ReadOnlyDispatcherConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath,
     projectsPath,
     codexExecutable: "unused-in-workflow-test",

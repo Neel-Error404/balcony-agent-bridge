@@ -40,6 +40,20 @@ describe("database migration concurrency", () => {
           "result_message_id",
           "result_payload_sha256",
         ]);
+        const tableSql = database
+          .prepare(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN ('inbox', 'outbox')",
+          )
+          .all() as Array<{ sql: string }>;
+        expect(tableSql.map((row) => row.sql).join("\n")).not.toContain(
+          "SYS-A",
+        );
+        const migration = database
+          .prepare(
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 5",
+          )
+          .get() as { count: number };
+        expect(migration.count).toBe(1);
       } finally {
         database.close();
       }

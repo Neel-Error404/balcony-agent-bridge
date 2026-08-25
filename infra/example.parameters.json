@@ -11,6 +11,25 @@
     "namespaceName": {
       "value": "replace-with-approved-globally-unique-name"
     },
+    "nodes": {
+      "value": [
+        {
+          "nodeId": "node-a",
+          "subscriptionName": "node-a",
+          "principalId": "11111111-1111-4111-8111-111111111111"
+        },
+        {
+          "nodeId": "node-b",
+          "subscriptionName": "node-b",
+          "principalId": "22222222-2222-4222-8222-222222222222"
+        },
+        {
+          "nodeId": "node-c",
+          "subscriptionName": "node-c",
+          "principalId": "33333333-3333-4333-8333-333333333333"
+        }
+      ]
+    },
     "diagnosticWorkspaceResourceId": {
       "value": ""
     }

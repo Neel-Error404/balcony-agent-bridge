@@ -479,7 +479,7 @@ function childResult(
 function bridgeConfig(databasePath: string): BridgeConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath,
     topicName: "agent-messages",
     subscriptionName: "sys-b",

@@ -56,7 +56,7 @@ export class ReadOnlyDispatcher {
     this.bridgeService = new AgentBridgeService(
       {
         systemId: config.systemId,
-        peerSystemId: config.peerSystemId,
+        authorizedNodeIds: config.authorizedNodeIds,
         databasePath: config.databasePath,
         topicName: "agent-messages",
         subscriptionName: config.systemId.toLowerCase(),

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { z } from "zod";
@@ -8,6 +9,7 @@ import { SystemIdSchema, type SystemId } from "./contracts/envelope.js";
 const EnvironmentSchema = z
   .object({
     BALCONY_SYSTEM_ID: SystemIdSchema,
+    BALCONY_AUTHORIZED_NODE_IDS: z.string().trim().min(1),
     BALCONY_BRIDGE_DB_PATH: z.string().trim().min(1).optional(),
     BALCONY_SERVICEBUS_NAMESPACE: z
       .string()
@@ -31,7 +33,46 @@ const EnvironmentSchema = z
       .min(1)
       .optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, context) => {
+    if (value.BALCONY_AZURE_AUTH_MODE === "client_certificate") {
+      for (const key of [
+        "BALCONY_AZURE_TENANT_ID",
+        "BALCONY_AZURE_CLIENT_ID",
+        "BALCONY_AZURE_CLIENT_CERTIFICATE_PATH",
+      ] as const) {
+        if (!value[key]) {
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: "is required for client_certificate authentication",
+          });
+        }
+      }
+      if (value.BALCONY_MANAGED_IDENTITY_CLIENT_ID) {
+        context.addIssue({
+          code: "custom",
+          path: ["BALCONY_MANAGED_IDENTITY_CLIENT_ID"],
+          message: "is not allowed for client_certificate authentication",
+        });
+      }
+      return;
+    }
+
+    for (const key of [
+      "BALCONY_AZURE_TENANT_ID",
+      "BALCONY_AZURE_CLIENT_ID",
+      "BALCONY_AZURE_CLIENT_CERTIFICATE_PATH",
+    ] as const) {
+      if (value[key]) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "is not allowed for managed_identity authentication",
+        });
+      }
+    }
+  });
 
 export type AzureAuthMode =
   | "managed_identity"
@@ -39,7 +80,7 @@ export type AzureAuthMode =
 
 export interface BridgeConfig {
   systemId: SystemId;
-  peerSystemId: SystemId;
+  authorizedNodeIds: readonly SystemId[];
   databasePath: string;
   serviceBusNamespace?: string;
   topicName: string;
@@ -49,6 +90,120 @@ export interface BridgeConfig {
   azureTenantId?: string;
   azureClientId?: string;
   azureClientCertificatePath?: string;
+}
+
+const MessageAuthenticationRuntimeEnvironmentSchema = z
+  .object({
+    BALCONY_MESSAGE_AUTH_MODE: z.literal("ed25519"),
+    BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH: z.string().trim().min(1),
+    BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH: z.string().trim().min(1),
+  })
+  .strict();
+
+export interface MessageAuthenticationRuntimeConfig {
+  mode: "ed25519";
+  membershipPath: string;
+  signingKeyPath: string;
+}
+
+const LocalProfileSchema = z
+  .object({
+    nodeId: SystemIdSchema,
+    authorizedNodeIds: z.array(SystemIdSchema).min(1).max(32),
+    databasePath: z.string().trim().min(1),
+    topicName: z.string().trim().min(1),
+    subscriptionName: z.string().trim().min(1),
+    serviceBusNamespace: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9-]+\.servicebus\.windows\.net$/i)
+      .optional(),
+    azureAuthMode: z.enum(["managed_identity", "client_certificate"]).optional(),
+    managedIdentityClientId: z.string().uuid().optional(),
+    azureTenantId: z.string().uuid().optional(),
+    azureClientId: z.string().uuid().optional(),
+    azureClientCertificatePath: z.string().trim().min(1).optional(),
+  })
+  .superRefine((value, context) => {
+    const hasAzureMetadata = Boolean(
+      value.serviceBusNamespace ||
+        value.azureAuthMode ||
+        value.managedIdentityClientId ||
+        value.azureTenantId ||
+        value.azureClientId ||
+        value.azureClientCertificatePath,
+    );
+    if (!hasAzureMetadata) {
+      return;
+    }
+    if (!value.serviceBusNamespace) {
+      context.addIssue({
+        code: "custom",
+        path: ["serviceBusNamespace"],
+        message: "is required when Azure metadata is configured",
+      });
+      return;
+    }
+    if (value.azureAuthMode === "client_certificate") {
+      for (const key of [
+        "azureTenantId",
+        "azureClientId",
+        "azureClientCertificatePath",
+      ] as const) {
+        if (!value[key]) {
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: "is required for client_certificate authentication",
+          });
+        }
+      }
+      if (value.managedIdentityClientId) {
+        context.addIssue({
+          code: "custom",
+          path: ["managedIdentityClientId"],
+          message: "is not allowed for client_certificate authentication",
+        });
+      }
+      return;
+    }
+    for (const key of [
+      "azureTenantId",
+      "azureClientId",
+      "azureClientCertificatePath",
+    ] as const) {
+      if (value[key]) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "is not allowed for managed_identity authentication",
+        });
+      }
+    }
+  })
+  .strict();
+
+export type LocalBridgeProfile = z.infer<typeof LocalProfileSchema>;
+
+export function parseLocalBridgeProfile(value: unknown): LocalBridgeProfile {
+  const result = LocalProfileSchema.safeParse(value);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "profile"}: ${issue.message}`)
+      .join("; ");
+    throw new ConfigurationError(`Invalid local bridge profile: ${detail}`);
+  }
+  if (!path.isAbsolute(result.data.databasePath)) {
+    throw new ConfigurationError(
+      "Invalid local bridge profile: databasePath must be absolute",
+    );
+  }
+  validateAuthorizedNodeIds(
+    result.data.authorizedNodeIds,
+    result.data.nodeId,
+    "authorizedNodeIds",
+  );
+  return result.data;
 }
 
 const DispatcherEnvironmentSchema = z
@@ -125,7 +280,7 @@ const DispatcherEnvironmentSchema = z
 
 export interface ReadOnlyDispatcherConfig {
   systemId: SystemId;
-  peerSystemId: SystemId;
+  authorizedNodeIds: readonly SystemId[];
   databasePath: string;
   projectsPath: string;
   codexExecutable: string;
@@ -156,7 +311,10 @@ export function loadConfig(
   }
 
   const systemId = result.data.BALCONY_SYSTEM_ID;
-  const peerSystemId = peerFor(systemId);
+  const authorizedNodeIds = parseAuthorizedNodeIds(
+    result.data.BALCONY_AUTHORIZED_NODE_IDS,
+    systemId,
+  );
   const programData =
     environment["ProgramData"] ??
     environment["PROGRAMDATA"] ??
@@ -173,7 +331,7 @@ export function loadConfig(
 
   return {
     systemId,
-    peerSystemId,
+    authorizedNodeIds,
     databasePath,
     topicName: result.data.BALCONY_SERVICEBUS_TOPIC,
     subscriptionName:
@@ -204,6 +362,121 @@ export function loadConfig(
   };
 }
 
+/**
+ * Loads signing material required only by the bridge transport worker.
+ *
+ * Keep this separate from loadConfig so MCP and dispatcher processes never
+ * require, inherit, or read the bridge signing-key path.
+ */
+export function loadMessageAuthenticationRuntimeConfig(
+  environment: NodeJS.ProcessEnv,
+  bridgeConfig: BridgeConfig,
+): MessageAuthenticationRuntimeConfig {
+  void bridgeConfig;
+  const result = MessageAuthenticationRuntimeEnvironmentSchema.safeParse({
+    BALCONY_MESSAGE_AUTH_MODE: environment["BALCONY_MESSAGE_AUTH_MODE"],
+    BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH:
+      environment["BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH"],
+    BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH:
+      environment["BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH"],
+  });
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join("; ");
+    throw new ConfigurationError(
+      `Invalid bridge runtime message authentication configuration: ${detail}`,
+    );
+  }
+
+  const membershipPath = requireAbsoluteMessageAuthenticationPath(
+    result.data.BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH,
+    "BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH",
+  );
+  const signingKeyPath = requireAbsoluteMessageAuthenticationPath(
+    result.data.BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH,
+    "BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH",
+  );
+  const pathsMatch = process.platform === "win32"
+    ? membershipPath.toLowerCase() === signingKeyPath.toLowerCase()
+    : membershipPath === signingKeyPath;
+  if (pathsMatch) {
+    throw new ConfigurationError(
+      "Invalid bridge runtime message authentication configuration: BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH and BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH must be different",
+    );
+  }
+
+  return {
+    mode: result.data.BALCONY_MESSAGE_AUTH_MODE,
+    membershipPath,
+    signingKeyPath,
+  };
+}
+
+function requireAbsoluteMessageAuthenticationPath(
+  value: string,
+  fieldName: string,
+): string {
+  if (!path.isAbsolute(value)) {
+    throw new ConfigurationError(
+      `Invalid bridge runtime message authentication configuration: ${fieldName} must be an absolute path`,
+    );
+  }
+  return path.resolve(value);
+}
+
+export function readLocalBridgeProfile(configPath: string): LocalBridgeProfile {
+  if (!path.isAbsolute(configPath)) {
+    throw new ConfigurationError("Local bridge profile path must be absolute");
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown read error";
+    throw new ConfigurationError(
+      `Unable to read local bridge profile '${configPath}': ${reason}`,
+    );
+  }
+
+  return parseLocalBridgeProfile(parsedJson);
+}
+
+export function loadConfigFile(configPath: string): BridgeConfig {
+  const profile = readLocalBridgeProfile(configPath);
+
+  const authorizedNodeIds = validateAuthorizedNodeIds(
+    profile.authorizedNodeIds,
+    profile.nodeId,
+    "authorizedNodeIds",
+  );
+  const azureAuthMode = profile.azureAuthMode ?? "managed_identity";
+  return {
+    systemId: profile.nodeId,
+    authorizedNodeIds,
+    databasePath: profile.databasePath,
+    topicName: profile.topicName,
+    subscriptionName: profile.subscriptionName,
+    azureAuthMode,
+    ...(profile.serviceBusNamespace
+      ? { serviceBusNamespace: profile.serviceBusNamespace }
+      : {}),
+    ...(profile.managedIdentityClientId
+      ? { managedIdentityClientId: profile.managedIdentityClientId }
+      : {}),
+    ...(profile.azureTenantId
+      ? { azureTenantId: profile.azureTenantId }
+      : {}),
+    ...(profile.azureClientId
+      ? { azureClientId: profile.azureClientId }
+      : {}),
+    ...(profile.azureClientCertificatePath
+      ? { azureClientCertificatePath: profile.azureClientCertificatePath }
+      : {}),
+  };
+}
+
 export function requireServiceBusNamespace(config: BridgeConfig): string {
   if (!config.serviceBusNamespace) {
     throw new ConfigurationError(
@@ -229,7 +502,7 @@ export function loadReadOnlyDispatcherConfig(
 
   return {
     systemId: bridge.systemId,
-    peerSystemId: bridge.peerSystemId,
+    authorizedNodeIds: bridge.authorizedNodeIds,
     databasePath: bridge.databasePath,
     projectsPath: path.resolve(result.data.BALCONY_DISPATCHER_PROJECTS_PATH),
     codexExecutable: path.resolve(result.data.BALCONY_CODEX_EXECUTABLE),
@@ -277,6 +550,39 @@ export function loadReadOnlyDispatcherConfig(
   };
 }
 
-function peerFor(systemId: SystemId): SystemId {
-  return systemId === "SYS-A" ? "SYS-B" : "SYS-A";
+function parseAuthorizedNodeIds(value: string, systemId: SystemId): SystemId[] {
+  const parsed = z
+    .array(SystemIdSchema)
+    .min(1)
+    .max(32)
+    .safeParse(value.split(",").map((item) => item.trim()));
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((issue) => issue.message).join("; ");
+    throw new ConfigurationError(
+      `Invalid bridge configuration: BALCONY_AUTHORIZED_NODE_IDS: ${detail}`,
+    );
+  }
+  return validateAuthorizedNodeIds(
+    parsed.data,
+    systemId,
+    "BALCONY_AUTHORIZED_NODE_IDS",
+  );
+}
+
+function validateAuthorizedNodeIds(
+  authorizedNodeIds: SystemId[],
+  systemId: SystemId,
+  fieldName: string,
+): SystemId[] {
+  if (new Set(authorizedNodeIds).size !== authorizedNodeIds.length) {
+    throw new ConfigurationError(
+      `Invalid bridge configuration: ${fieldName}: duplicate node IDs are not allowed`,
+    );
+  }
+  if (authorizedNodeIds.includes(systemId)) {
+    throw new ConfigurationError(
+      `Invalid bridge configuration: ${fieldName}: the local node ID is not a remote node`,
+    );
+  }
+  return authorizedNodeIds;
 }

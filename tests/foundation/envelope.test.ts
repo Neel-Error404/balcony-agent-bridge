@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BridgeEnvelopeSchema,
+  NodeIdSchema,
   createEnvelope,
   hashPayload,
 } from "../../src/contracts/envelope.js";
@@ -19,6 +20,29 @@ const payload = {
 };
 
 describe("bridge envelope", () => {
+  it("accepts bounded generic node identifiers while preserving legacy IDs", () => {
+    expect(NodeIdSchema.parse("SYS-A")).toBe("SYS-A");
+    expect(NodeIdSchema.parse("review-node-03")).toBe("review-node-03");
+    expect(() => NodeIdSchema.parse("-invalid")).toThrow();
+    expect(() => NodeIdSchema.parse("Review-Node")).toThrow();
+    expect(() => NodeIdSchema.parse("node with spaces")).toThrow();
+    expect(() => NodeIdSchema.parse(`n${"a".repeat(50)}`)).toThrow();
+  });
+
+  it("routes an envelope between arbitrary distinct nodes", () => {
+    const envelope = createEnvelope({
+      idempotencyKey: "generic-node-route",
+      originSystem: "review-node-01",
+      targetSystem: "review-node-03",
+      kind: "message",
+      streamId: "phase-2",
+      payload,
+    });
+
+    expect(envelope.origin_system).toBe("review-node-01");
+    expect(envelope.target_system).toBe("review-node-03");
+  });
+
   it("creates a valid secret-safe envelope", () => {
     const envelope = createEnvelope({
       idempotencyKey: "architecture-review-1",

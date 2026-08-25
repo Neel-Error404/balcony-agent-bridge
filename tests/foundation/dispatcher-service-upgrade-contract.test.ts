@@ -56,5 +56,9 @@ describe("dispatcher existing-service upgrade contract", () => {
     expect(script).toContain('"__DISPATCHER_MODE__" = $DispatcherMode');
     expect(script).toContain('"__DISPATCHER_ENTRYPOINT__" = $dispatcherEntrypoint');
     expect(lifecycle).toContain("$snapshot.ChildCount -eq 1");
+    expect(script).toContain("[string[]] $AuthorizedNodeIds");
+    expect(script).toContain(
+      '"__AUTHORIZED_NODE_IDS__" = $authorizedNodeIdsValue',
+    );
   });
 });

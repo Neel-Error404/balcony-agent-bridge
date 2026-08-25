@@ -1,7 +1,4 @@
 [mcp_servers.balcony-agent-bridge]
-command = "node"
-args = ["D:\\Work_Projects\\balcony-agent-bridge\\dist\\mcp\\index.js"]
-env = {
-  BALCONY_SYSTEM_ID = "SYS-A",
-  BALCONY_BRIDGE_DB_PATH = "C:\\ProgramData\\Balcony\\AgentBridge\\data\\bridge.sqlite3"
-}
+# Prefer the exact absolute registration printed by `balcony-agent-bridge setup`.
+command = "C:\\path\\to\\node.exe"
+args = ["C:\\path\\to\\balcony-agent-bridge\\dist\\mcp\\index.js", "--config", "C:\\path\\to\\agent-bridge\\config.json"]

@@ -7,6 +7,7 @@ import {
   ServiceBusError,
   RetryMode,
   type ServiceBusMessage,
+  type ServiceBusReceivedMessage,
   type ServiceBusSender,
   type ServiceBusSessionReceiver,
 } from "@azure/service-bus";
@@ -16,6 +17,10 @@ import type { BridgeConfig } from "../config.js";
 import { requireServiceBusNamespace } from "../config.js";
 import type { BridgeEnvelope } from "../contracts/envelope.js";
 import { ConfigurationError } from "../errors.js";
+import {
+  type MessageAuthWire,
+  MessageAuthenticator,
+} from "../security/message-authentication.js";
 import type {
   BridgeTransport,
   InboundDelivery,
@@ -31,6 +36,7 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
 
   public constructor(
     private readonly config: BridgeConfig,
+    private readonly authenticator: MessageAuthenticator,
     credential?: TokenCredential,
     clientFactory?: ServiceBusClientFactory,
   ) {
@@ -62,7 +68,8 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
   }
 
   public async send(envelope: BridgeEnvelope): Promise<void> {
-    await this.sender.sendMessages(toServiceBusMessage(envelope));
+    const authenticated = this.authenticator.sign(envelope);
+    await this.sender.sendMessages(toServiceBusMessage(envelope, authenticated));
   }
 
   public async receiveAvailable(
@@ -103,8 +110,20 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
         },
       );
       for (const message of messages) {
+        let envelope: BridgeEnvelope;
+        try {
+          envelope = this.authenticator.verify(message.body);
+          assertBrokerMetadataMatches(message, envelope);
+        } catch {
+          await receiver.deadLetterMessage(message, {
+            deadLetterReason: MESSAGE_AUTHENTICATION_DEAD_LETTER_REASON,
+            deadLetterErrorDescription:
+              MESSAGE_AUTHENTICATION_DEAD_LETTER_DESCRIPTION,
+          });
+          continue;
+        }
         const delivery: InboundDelivery = {
-          body: message.body,
+          body: envelope,
           brokerMessageId: String(message.messageId ?? message.sequenceNumber),
           deliveryCount: message.deliveryCount ?? 0,
           ...(message.sessionId ? { sessionId: message.sessionId } : {}),
@@ -162,19 +181,18 @@ export type ServiceBusClientFactory = (
   role: "sender" | "receiver",
 ) => ServiceBusClientAdapter;
 
+export const MESSAGE_AUTHENTICATION_DEAD_LETTER_REASON =
+  "MessageAuthenticationFailed";
+export const MESSAGE_AUTHENTICATION_DEAD_LETTER_DESCRIPTION =
+  "Message authentication rejected.";
+
 export function createServiceBusCredential(
   config: BridgeConfig,
 ): TokenCredential {
   if (config.azureAuthMode === "managed_identity") {
-    if (!config.managedIdentityClientId) {
-      throw new ConfigurationError(
-        "BALCONY_MANAGED_IDENTITY_CLIENT_ID is required " +
-          "when BALCONY_AZURE_AUTH_MODE is managed_identity",
-      );
-    }
-    return new ManagedIdentityCredential(
-      config.managedIdentityClientId,
-    );
+    return config.managedIdentityClientId
+      ? new ManagedIdentityCredential(config.managedIdentityClientId)
+      : new ManagedIdentityCredential();
   }
 
   const missing = [
@@ -204,6 +222,7 @@ export function createServiceBusCredential(
 
 export function toServiceBusMessage(
   envelope: BridgeEnvelope,
+  authenticated: MessageAuthWire,
 ): ServiceBusMessage {
   const ttl = envelope.expires_at_utc
     ? Math.max(
@@ -213,7 +232,7 @@ export function toServiceBusMessage(
       )
     : undefined;
   return {
-    body: envelope,
+    body: authenticated,
     messageId: envelope.message_id,
     sessionId: envelope.conversation_id,
     subject: envelope.kind,
@@ -228,4 +247,26 @@ export function toServiceBusMessage(
       : {}),
     ...(ttl !== undefined ? { timeToLive: ttl } : {}),
   };
+}
+
+function assertBrokerMetadataMatches(
+  message: ServiceBusReceivedMessage,
+  envelope: BridgeEnvelope,
+): void {
+  if (
+    message.messageId !== envelope.message_id ||
+    message.sessionId !== envelope.conversation_id ||
+    message.correlationId !== (envelope.correlation_id ?? undefined) ||
+    message.subject !== envelope.kind
+  ) {
+    throw new Error("Broker metadata does not match authenticated envelope");
+  }
+  const properties = message.applicationProperties;
+  if (
+    properties?.["bridgeTarget"] !== envelope.target_system ||
+    properties["schemaVersion"] !== envelope.schema_version ||
+    properties["streamId"] !== envelope.stream_id
+  ) {
+    throw new Error("Broker metadata does not match authenticated envelope");
+  }
 }

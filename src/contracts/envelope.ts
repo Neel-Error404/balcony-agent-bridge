@@ -9,7 +9,6 @@ import {
 } from "./coordination.js";
 import { ConsultationContextSchema } from "./consultation.js";
 
-export const SYSTEM_IDS = ["SYS-A", "SYS-B"] as const;
 export const MESSAGE_KINDS = [
   "message",
   "task_request",
@@ -19,9 +18,22 @@ export const MESSAGE_KINDS = [
   "heartbeat",
 ] as const;
 
-export const SystemIdSchema = z.enum(SYSTEM_IDS);
+export const NodeIdSchema = z.union([
+  z.enum(["SYS-A", "SYS-B"]),
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(50)
+    .regex(
+      /^[a-z][a-z0-9-]*$/,
+      "must be a lowercase identifier that starts with a letter and contains only letters, numbers, or hyphens",
+    ),
+]);
+export const SystemIdSchema = NodeIdSchema;
 export const MessageKindSchema = z.enum(MESSAGE_KINDS);
 
+export type NodeId = z.infer<typeof NodeIdSchema>;
 export type SystemId = z.infer<typeof SystemIdSchema>;
 export type MessageKind = z.infer<typeof MessageKindSchema>;
 

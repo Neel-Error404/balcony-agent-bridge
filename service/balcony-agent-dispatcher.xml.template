@@ -7,6 +7,7 @@
   <workingdirectory>__WORKING_DIRECTORY__</workingdirectory>
   <startmode>Manual</startmode>
   <env name="BALCONY_SYSTEM_ID" value="__SYSTEM_ID__" />
+  <env name="BALCONY_AUTHORIZED_NODE_IDS" value="__AUTHORIZED_NODE_IDS__" />
   <env name="BALCONY_BRIDGE_DB_PATH" value="__DATABASE_PATH__" />
   <env name="BALCONY_DISPATCHER_PROJECTS_PATH" value="__PROJECT_REGISTRY_PATH__" />
   <env name="BALCONY_CODEX_EXECUTABLE" value="__CODEX_EXECUTABLE__" />

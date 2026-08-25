@@ -230,7 +230,7 @@ function dispatcherConfig(
 ): ReadOnlyDispatcherConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath: ":memory:",
     projectsPath,
     codexExecutable: "unused-in-component-test",
