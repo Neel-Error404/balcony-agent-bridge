@@ -2,19 +2,21 @@
 
 ## Supported Versions
 
-Balcony Agent Bridge has not yet published a supported release. The project is
-licensed under Apache-2.0, but the current `0.1.0` package remains private while
-public-release review is in progress.
+Balcony Agent Bridge has not yet published a supported release. The source
+repository is public under Apache-2.0, while the current `0.1.0` npm package is
+unpublished and remains `private: true`.
 
 ## Reporting A Vulnerability
 
 Do not open a public issue containing credentials, private endpoints, message
 contents, exploit details, or identifying deployment information.
 
-When the public repository is created, use its private vulnerability-reporting
-channel. If that channel is unavailable, contact the maintainers privately
-through the repository owner's published security contact. A concrete security
-contact must be added before the first public release.
+GitHub private vulnerability reporting is not yet enabled for this repository.
+Until it is enabled, do not put sensitive details in a public issue. Open a
+minimal issue that requests a private security contact without including the
+vulnerability, deployment, or reproduction details. A supported release
+requires the owner to enable private reporting or publish a concrete private
+security contact.
 
 Include the affected version or commit, impact, reproduction conditions, and
 whether any credentials or live systems may have been exposed. Do not test

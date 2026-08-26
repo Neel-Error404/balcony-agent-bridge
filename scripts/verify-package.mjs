@@ -228,6 +228,10 @@ function runInstallSmoke(useCleanCache) {
 
     identityDirectory = createPackageIdentityDirectory();
     prepareIdentityDirectory(identityDirectory);
+    const nodeAEnvironment = {
+      ...process.env,
+      BALCONY_SYSTEM_ID: "node-a",
+    };
     const identity = runInstalledCli(
       cliBin,
       [
@@ -238,6 +242,7 @@ function runInstallSmoke(useCleanCache) {
         identityDirectory,
       ],
       consumerDirectory,
+      { env: nodeAEnvironment },
     );
     requireExit(identity, 0, "packaged CLI identity generation");
     const identityPayload = JSON.parse(identity.stdout);
@@ -285,6 +290,7 @@ function runInstallSmoke(useCleanCache) {
         "node-c",
       ],
       consumerDirectory,
+      { env: nodeAEnvironment },
     );
     requireExit(setup, 0, "packaged CLI setup");
     const setupPayload = JSON.parse(setup.stdout);
@@ -312,6 +318,7 @@ function runInstallSmoke(useCleanCache) {
         "node-c",
       ],
       consumerDirectory,
+      { env: nodeAEnvironment },
     );
     requireExit(repeatedSetup, 0, "packaged CLI idempotent setup");
     if (JSON.parse(repeatedSetup.stdout).created !== false) {
@@ -321,6 +328,7 @@ function runInstallSmoke(useCleanCache) {
     const defaultDataRoot = path.join(temporaryDirectory, "default-data-root");
     const defaultEnvironment = {
       ...process.env,
+      BALCONY_SYSTEM_ID: "default-node",
       ...(process.platform === "win32"
         ? { LOCALAPPDATA: defaultDataRoot }
         : { XDG_CONFIG_HOME: defaultDataRoot }),

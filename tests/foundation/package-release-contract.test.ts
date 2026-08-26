@@ -12,6 +12,9 @@ interface PackageManifest {
   bin?: Record<string, string>;
   scripts?: Record<string, string>;
   engines?: Record<string, string>;
+  repository?: { type?: string; url?: string };
+  homepage?: string;
+  bugs?: { url?: string };
 }
 
 function readPackageManifest(): PackageManifest {
@@ -38,6 +41,16 @@ describe("npm release boundary", () => {
       "balcony-agent-bridge-mcp": "./dist/mcp/index.js",
     });
     expect(manifest.engines).toEqual({ node: ">=22.0.0", npm: ">=10.0.0" });
+    expect(manifest.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/Neel-Error404/balcony-agent-bridge.git",
+    });
+    expect(manifest.homepage).toBe(
+      "https://github.com/Neel-Error404/balcony-agent-bridge#readme",
+    );
+    expect(manifest.bugs).toEqual({
+      url: "https://github.com/Neel-Error404/balcony-agent-bridge/issues",
+    });
     expect(manifest.scripts?.["build"]).toBe(
       "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
     );

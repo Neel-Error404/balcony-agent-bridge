@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertConfigMatchesProcessIdentity,
+  assertSystemIdMatchesProcessIdentity,
   loadConfig,
   loadConfigFile,
 } from "../config.js";
@@ -119,6 +120,7 @@ function runIdentity(args: readonly string[]): void {
     );
   }
   const nodeId = NodeIdSchema.parse(values["node-id"]);
+  assertSystemIdMatchesProcessIdentity(nodeId);
   const result = generateNodeIdentity({
     nodeId,
     outputDirectory: requireAbsolute(
@@ -169,6 +171,7 @@ function runSetup(args: readonly string[]): void {
     ? requireAbsolute(values.database, "--database")
     : path.join(path.dirname(configPath), "bridge.sqlite3");
   const nodeId = NodeIdSchema.parse(values["node-id"]);
+  assertSystemIdMatchesProcessIdentity(nodeId);
   const authorizedNodeIds = values["authorized-node"].map((value) =>
     NodeIdSchema.parse(value),
   );

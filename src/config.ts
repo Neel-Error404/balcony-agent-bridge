@@ -481,17 +481,25 @@ export function assertConfigMatchesProcessIdentity(
   config: BridgeConfig,
   environment: NodeJS.ProcessEnv = process.env,
 ): BridgeConfig {
+  assertSystemIdMatchesProcessIdentity(config.systemId, environment);
+  return config;
+}
+
+export function assertSystemIdMatchesProcessIdentity(
+  systemId: SystemId,
+  environment: NodeJS.ProcessEnv = process.env,
+): SystemId {
   const processIdentity = environment["BALCONY_SYSTEM_ID"];
   if (processIdentity === undefined) {
-    return config;
+    return systemId;
   }
   const parsedIdentity = SystemIdSchema.safeParse(processIdentity);
-  if (!parsedIdentity.success || parsedIdentity.data !== config.systemId) {
+  if (!parsedIdentity.success || parsedIdentity.data !== systemId) {
     throw new ConfigurationError(
-      "Explicit local profile identity does not match process identity",
+      "Explicit node identity does not match process identity",
     );
   }
-  return config;
+  return systemId;
 }
 
 export function requireServiceBusNamespace(config: BridgeConfig): string {

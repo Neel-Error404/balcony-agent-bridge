@@ -139,7 +139,7 @@ describe("bridge configuration", () => {
         assertConfigMatchesProcessIdentity(config, {
           BALCONY_SYSTEM_ID: processIdentity,
         }),
-      ).toThrow(/profile identity does not match process identity/i);
+      ).toThrow(/node identity does not match process identity/i);
     }
   });
 

@@ -16,6 +16,52 @@ describe("CLI explicit profile identity", () => {
     }
   });
 
+  it("rejects setup for a different process identity before writing", () => {
+    const temporaryDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-agent-bridge-setup-identity-"),
+    );
+    temporaryDirectories.push(temporaryDirectory);
+    const configPath = path.join(temporaryDirectory, "profile", "config.json");
+    const databasePath = path.join(temporaryDirectory, "data", "bridge.sqlite3");
+    const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(repositoryRoot, "src", "cli", "index.ts"),
+        "setup",
+        "--config",
+        configPath,
+        "--database",
+        databasePath,
+        "--node-id",
+        "node-a",
+        "--authorized-node",
+        "node-b",
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          BALCONY_SYSTEM_ID: "node-b",
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trim()).toBe("setup failed (CONFIGURATION_ERROR)");
+    expect(result.stderr).not.toContain("node-a");
+    expect(result.stderr).not.toContain("node-b");
+    expect(result.stderr).not.toContain(configPath);
+    expect(result.stderr).not.toContain(databasePath);
+    expect(fs.readdirSync(temporaryDirectory)).toEqual([]);
+  });
+
   it.each(["status", "doctor"])(
     "rejects a %s profile for a different process identity",
     (command) => {
