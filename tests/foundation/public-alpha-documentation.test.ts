@@ -33,6 +33,12 @@ describe("public alpha documentation contract", () => {
     expect(readme).toContain("npm run verify:public-alpha");
     expect(readme).toContain("private: true");
     expect(readme).toContain("does not publish");
+    expect(readme).toContain(
+      "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
+    );
+    expect(readme).toContain("--subscription bridge-build");
+    expect(readme).toContain('$env:BALCONY_SYSTEM_ID = "laptop-a"');
+    expect(readme).toContain('$env:BALCONY_SYSTEM_ID = "build-node"');
   });
 
   it("ships the minimum source documentation for an operator decision", () => {

@@ -10,8 +10,10 @@ authorized nodes, direct one-to-one routing, one production transport, and an
 optional read-only Codex dispatcher. It is not a hosted discovery service, a
 file-sync product, or a writable remote-execution platform.
 
-This repository is a local release candidate. Version `0.1.0` remains
-`private: true`, so the documented packaging commands do not publish it.
+This repository is a public source alpha under Apache-2.0. Anyone may clone,
+build, inspect, modify, and use it under that license. Version `0.1.0` is not
+published to npm and remains `private: true`, so installation is currently from
+source or a locally built tarball rather than a public package registry.
 
 ## Install
 
@@ -27,6 +29,8 @@ Requirements:
 From a source checkout:
 
 ```powershell
+git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
+Set-Location balcony-agent-bridge
 npm ci
 npm run build
 $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
@@ -86,6 +90,7 @@ machine may contact. Setup creates a private local JSON profile plus a v7
 SQLite database:
 
 ```powershell
+$env:BALCONY_SYSTEM_ID = "laptop-a"
 node $bridgeCli setup `
   --node-id laptop-a `
   --authorized-node laptop-b `
@@ -138,6 +143,7 @@ repository. Before running this command, complete the pre-generation Windows
 ACL procedure in `docs/message-authentication.md` for the same output directory:
 
 ```powershell
+$env:BALCONY_SYSTEM_ID = "build-node"
 node .\dist\cli\index.js identity `
   --node-id build-node `
   --output-directory "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node-identity"
@@ -166,6 +172,7 @@ From that durable reviewed source runtime, after the service has been installed
 but before it is started, create the matching production profile:
 
 ```powershell
+$env:BALCONY_SYSTEM_ID = "build-node"
 node .\dist\cli\index.js setup `
   --config "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node.json" `
   --database "$env:ProgramData\Balcony\AgentBridge\data\bridge.sqlite3" `
@@ -173,9 +180,14 @@ node .\dist\cli\index.js setup `
   --authorized-node laptop-a `
   --authorized-node laptop-b `
   --servicebus-namespace replace-with-approved.servicebus.windows.net `
+  --subscription bridge-build `
   --auth-mode managed_identity `
   --managed-identity-client-id 11111111-1111-4111-8111-111111111111
 ```
+
+Both `identity --node-id` and `setup --node-id` fail before writing when an
+existing `BALCONY_SYSTEM_ID` names another node. Set it to the node being
+provisioned, or use a clean shell where it is intentionally unset.
 
 Register only this production setup's returned MCP snippet. The MCP process
 receives the profile path and SQLite access, but no Azure credential or
@@ -325,8 +337,10 @@ level. `docs/release-manifest-v0.1.md` separates locally verifiable checks from
 owner-gated Git history, publication, Azure, service, and live multi-node
 checks.
 
-The package and repository visibility remain private pending owner approval;
-these commands do not publish, deploy, install a service, change RBAC, or alter
-a live bridge.
+The source repository is public. The npm package remains unpublished and
+`private: true`; these commands do not publish, deploy, install a service,
+change RBAC, or alter a live bridge. See `SECURITY.md` before reporting a
+vulnerability and `docs/ROADMAP.md` for the implementation journey and current
+release gates.
 
 The local verification workflow does not publish anything.

@@ -4,6 +4,14 @@
   "private": true,
   "license": "Apache-2.0",
   "description": "Durable MCP bridge for secret-safe coordination between coding agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neel-Error404/balcony-agent-bridge.git"
+  },
+  "homepage": "https://github.com/Neel-Error404/balcony-agent-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/Neel-Error404/balcony-agent-bridge/issues"
+  },
   "type": "module",
   "files": [
     "dist",

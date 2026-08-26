@@ -8,10 +8,15 @@ dead-letter replay.
 
 - `setup` requires Node.js 22+, one valid local node ID, at least one distinct
   authorized peer, and absolute paths when `--config` or `--database` is used.
+- `identity --node-id` and `setup --node-id` reject a node ID that differs from
+  an existing `BALCONY_SYSTEM_ID` before creating any directory or file. Set
+  the variable to the node being provisioned, or use a clean shell where it is
+  intentionally unset.
 - `created: false` is the expected result of an exact rerun.
-- If a rerun reports `setup failed (CONFIGURATIONERROR)`, compare the requested
-  values with the existing profile. Setup intentionally does not disclose path
-  details or overwrite a different profile.
+- If setup reports `setup failed (CONFIGURATION_ERROR)`, first compare
+  `BALCONY_SYSTEM_ID` with `--node-id`, then compare the requested values with
+  the existing profile. Setup intentionally does not disclose path details or
+  overwrite a different profile.
 - If the requested database already exists without the requested profile,
   preserve it and determine its owner before proceeding.
 - Certificate mode requires an existing absolute certificate file plus tenant

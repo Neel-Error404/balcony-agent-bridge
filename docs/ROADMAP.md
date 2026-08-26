@@ -1,14 +1,45 @@
 # Balcony Agent Bridge Roadmap
 
 Balcony Agent Bridge is a durable MCP communication layer for coding agents.
-The current system is operational between two trusted machines. The first
-open-source release will preserve that working core while making node setup,
-configuration, packaging, and security boundaries understandable to another
-operator.
+It began as an operational one-to-one bridge between two trusted machines. The
+source now implements a bounded static multi-node network while preserving the
+working delivery, recovery, and security core.
 
 This roadmap intentionally favors a small, usable release over a broad
 platform. Dates are not release promises; each phase advances only after its
 exit checks pass.
+
+## Journey And Current State
+
+This is the public-safe record of the project discussion and implementation
+journey. Raw chat transcripts are not a product source of truth; code, tests,
+Git history, and the dated verification records remain authoritative.
+
+| Stage | What changed | Verified outcome |
+|---|---|---|
+| Operational starting point | A fixed SYS-A/SYS-B bridge used SQLite, Azure Service Bus, local MCP, and explicit human governance. | The accepted two-machine runtime remains pinned at `9468ab9`; the open-source work did not mutate it. |
+| First-principles plan | The goal became lower-friction, secret-safe one-to-many coordination without hosted discovery, a control plane, or writable remote execution. | The roadmap bounded the work to static membership, explicit targets, local setup, documentation, and security. |
+| Phase 0 | Isolated the work from the operational checkout and reproduced the baseline. | Existing behavior and test tiers passed before architecture changes. |
+| Phase 1 | Added Apache-2.0, package allowlists, secret/history checks, sanitized examples, and runnable CLI output. | A reviewed local tarball could be built and installed without private runtime state. |
+| Phase 2 | Replaced hard-coded two-node routing with validated node IDs, explicit targets, schema migration, and generated bounded Azure topology. | Three-node, reply, duplicate, and offline-recovery paths passed locally. |
+| Phase 3 | Added the Azure-free demo, create-only setup, generated MCP registration, and `doctor`. | A new operator could evaluate and configure a node locally with one setup command. |
+| Phase 4 | Added Ed25519 whole-envelope authentication, explicit membership, ingress provenance, rotation/revocation guidance, and Windows ACL gates. | Production transport fails closed on spoofing, malformed authentication, and unsafe runtime inputs. |
+| Phase 5 | Reworked the README and runbooks around install, connect, verify, upgrade, recover, clean-consumer packaging, and known limitations. | PR #2 passed the ordered local verification and review cycle and merged as `2ab0b512`. |
+| Phase 6 | Closes the post-merge provisioning-identity gap and reconciles documentation with the repository's actual public state. | Implemented and locally verified on `codex/open-source-phase6`; Git delivery is pending. |
+
+Current truth:
+
+- the GitHub source repository is public and Apache-2.0 licensed, so anyone can
+  clone, build, modify, and use it from source;
+- the npm package remains unpublished and `private: true`; there is no version
+  tag or GitHub release;
+- the generic multi-node design is locally verified, but it has not replaced
+  the accepted two-machine live runtime or completed a live signed three-node
+  acceptance test; and
+- the repository became public before the planned clean-export boundary was
+  reconciled. Reachable-history scanning reports no known credential patterns,
+  but operational evidence remains in public history and needs an explicit
+  owner decision before a supported release.
 
 ## Product Direction
 
@@ -40,9 +71,9 @@ in the isolated worktree.
 
 ## Phase 1: Public Safety And Packaging
 
-Status: locally implemented on 2026-08-25. Apache-2.0 was selected on
-2026-08-25. Clean-history export and public-registry installation remain
-owner-gated release checks.
+Status: implemented on 2026-08-25 and merged to the public repository on
+2026-08-26. Apache-2.0 is selected. The planned clean-export boundary was not
+completed before visibility changed, and npm installation remains unpublished.
 
 - Audit the repository and Git history for credentials, private endpoints,
   machine-local configuration, private identities, and internal-only evidence.
@@ -58,8 +89,8 @@ private handoffs, local databases, logs, or internal evidence.
 
 ## Phase 2: Generic Node Addressing
 
-Status: locally implemented on 2026-08-25. Final verification and owner review
-remain release gates; no Azure resources or running services were changed.
+Status: implemented, reviewed, and merged. No Azure resources or running
+services were changed.
 
 - Replace the closed `SYS-A`/`SYS-B` type with validated node identifiers.
 - Replace implicit peer selection with explicit source and target routing.
@@ -74,8 +105,8 @@ duplicates, offline recovery, and rejection of unknown nodes.
 
 ## Phase 3: One-Command Node Setup
 
-Status: locally implemented on 2026-08-25. Cloud provisioning, RBAC changes,
-registry publication, and live multi-machine validation remain owner-gated.
+Status: implemented, reviewed, and merged. Cloud provisioning, RBAC changes,
+npm publication, and live multi-machine validation remain owner-gated.
 
 - Add a single setup command that validates prerequisites, writes only local
   configuration, initializes the database, and prints the MCP registration.
@@ -89,9 +120,8 @@ diagnose failures using the documented happy path.
 
 ## Phase 4: Multi-Node Security Gate
 
-Status: locally implemented on 2026-08-25. Live multi-machine cutover, Azure
-RBAC changes, service installation, publication, and Git delivery remain
-owner-gated.
+Status: implemented, reviewed, and merged. Live multi-machine cutover, Azure
+RBAC changes, service installation, and npm publication remain owner-gated.
 
 - Add an explicit network membership policy and least-privilege routing model.
 - Authenticate node messages so integrity is not based only on an unkeyed
@@ -106,11 +136,12 @@ leakage cases.
 
 ## Phase 5: Public Alpha Candidate
 
-Status: locally implemented on 2026-08-25. The clean-environment proof uses a
-disposable empty npm consumer and isolated empty npm cache on the current host;
-it does not claim validation on a separate operating-system image. Public Git
-export, security contact, package/repository URLs, publication, Azure/service
-changes, and live signed multi-machine acceptance remain owner-gated.
+Status: implemented on 2026-08-25 and merged to the public repository on
+2026-08-26. The clean-environment proof uses a disposable empty npm consumer
+and isolated empty npm cache on the current host; it does not claim validation
+on a separate operating-system image. A private security-reporting channel,
+clean-history decision, npm publication, Azure/service changes, and live signed
+multi-machine acceptance remain owner-gated.
 
 - Rewrite the README around install, local demo, deploy, configure, connect,
   verify, upgrade, and recover.
@@ -121,9 +152,32 @@ changes, and live signed multi-machine acceptance remain owner-gated.
   exact isolation boundary.
 - Produce a release manifest with exact checks and known limitations.
 
-Exit: the repository is decision-ready for an owner-approved public release.
-Publication, npm release, Azure deployment, and repository visibility changes
-remain separate owner-gated operations.
+Exit: the repository is available as a public source alpha. A supported release,
+npm publication, Azure deployment, and live cutover remain separate owner-gated
+operations.
+
+## Phase 6: Public-State And Identity Closure
+
+Status: locally implemented and verified on 2026-08-26. Git delivery is
+pending.
+
+- Enforce `BALCONY_SYSTEM_ID` for `identity --node-id` and `setup --node-id`
+  before either command creates directories, credentials, profiles, or
+  databases.
+- Add negative integration coverage proving a mismatch fails with sanitized
+  output and leaves the filesystem unchanged.
+- Reconcile README, security, contribution, release-boundary, and limitation
+  wording with the public GitHub repository and unpublished npm package.
+- Add canonical repository URLs to package metadata without enabling npm
+  publication.
+- Record the completed public-safe journey and distinguish source availability,
+  supported release, package publication, and live deployment.
+
+Exit: every known implementation blocker from PR #2 is closed, public users get
+truthful source-build guidance, and remaining history, security-channel,
+release/tag, npm, and live-deployment decisions are explicit rather than
+implied. Phase 6 does not rewrite Git history, publish a package, or mutate
+Azure or live services.
 
 ## Deferred Until Demand Is Proven
 

@@ -32,7 +32,15 @@ the smaller static design.
   they cannot authorize new continuation work.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
   it is accepted for the local Phase 5 gate but is not evidence from a separate
-  clean OS/VM. Public-registry installation remains owner-gated.
+  clean OS/VM. The repository is public, but no npm package, GitHub release, or
+  version tag has been published; consumers currently build from source.
+- GitHub private vulnerability reporting is not enabled and no concrete
+  private fallback contact is published. Follow `SECURITY.md` without putting
+  sensitive details in a public issue.
+- The repository became public before its planned clean-export boundary was
+  reconciled. Reachable-history secret scanning reports no known credential
+  patterns, but operational handoff and verification records remain visible in
+  history and require an explicit owner decision before a supported release.
 - A live signed three-machine acceptance test has not been performed on this
   candidate.
 

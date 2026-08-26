@@ -1,8 +1,10 @@
 # Public Release Boundary
 
-Balcony Agent Bridge currently lives in a private operational repository. A
-public release must be produced from a reviewed, secret-safe tree; changing the
-visibility of the operational repository is not an acceptable shortcut.
+Balcony Agent Bridge is now in a public GitHub repository. The visibility
+change occurred before the clean-export boundary below was reconciled. This
+document therefore separates observed public state from the stricter boundary
+required for a supported release; it does not retroactively describe the
+current history as a clean export.
 
 ## npm Package
 
@@ -22,14 +24,14 @@ the npm artifact. `npm run verify:package` enforces this boundary, and
 `npm run smoke:package` installs the tarball in a temporary directory and
 checks the installed CLI.
 
-## Public Source Export
+## Intended Public Source Export
 
 A public source repository may contain the reusable implementation and its
 tests, generic infrastructure templates, public examples, architecture and
 security documentation, and contributor guidance.
 
-The following operational records are private-only and must not be copied into
-a public source export:
+The original release plan classified the following operational records as
+private-only and excluded them from a clean public source export:
 
 - `AGENTS.md` while it contains private vault or machine routing;
 - `docs/handoff/`;
@@ -57,14 +59,33 @@ that will become public.
 A clean history is the default recommendation because it avoids carrying
 private operational records into a repository that may later become public.
 
+## Observed Public History
+
+The repository became public with `AGENTS.md`, `docs/handoff/**`,
+`docs/verification/**`, internal plans, and machine-oriented operational notes
+still reachable. The current-tree and reachable-history safety scan reports no
+known credential patterns, but that does not satisfy the planned privacy
+boundary or prove that every operational detail was intended for publication.
+
+Removing files from a later commit would not remove their earlier versions.
+Before a supported release, the owner must explicitly choose one of these
+paths:
+
+1. accept the existing operational evidence as intentionally public after a
+   dedicated privacy review and revise this boundary; or
+2. create a reviewed clean export or sanitize history, understanding that this
+   changes public Git history and requires a separately approved migration.
+
+Phase 6 records this divergence but does not silently rewrite history.
+
 ## Current Gate
 
-The package remains marked `private` while release review continues. The owner
-selected Apache-2.0 on 2026-08-25, and the package and source now carry that
-license. This permits local tarball verification and prevents npm publication.
-It does not prevent a Git repository or branch from being exposed. Creating the
-public repository, changing visibility, pushing, and publishing to npm require
-separate owner approval.
+The source repository is public under Apache-2.0. The package remains marked
+`private`, which permits local tarball verification and prevents npm
+publication. No GitHub release, version tag, or npm package has been published.
+The history decision, private vulnerability-reporting channel, supported
+release, npm publication, Azure changes, and live deployment remain separate
+owner-approved actions.
 
 The automated safety check detects private-key blocks, common cloud and SaaS
 token formats, credentialed URLs, Azure Service Bus and Storage connection
@@ -76,5 +97,5 @@ that no unknown secret format exists; manual review remains required.
 
 The owner selected the Apache License 2.0 on 2026-08-25 because its explicit
 patent grant gives infrastructure contributors and adopters clearer protection.
-Publication remains separately owner-gated while the npm package is marked
-`private`.
+The public source is governed by that license. Package publication remains
+separately owner-gated while the npm package is marked `private`.

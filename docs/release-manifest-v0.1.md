@@ -1,8 +1,9 @@
 # v0.1 Public Alpha Release Manifest
 
 This manifest defines the decision gate for `balcony-agent-bridge` version
-`0.1.0`. It is not a publication record. The package remains `private: true`
-until the owner separately approves repository visibility and npm publication.
+`0.1.0`. The source repository is public, but this is not a supported-release
+or npm-publication record. The package remains `private: true` until the owner
+separately approves npm publication.
 
 ## Included Source Surfaces
 
@@ -28,6 +29,12 @@ Private profiles, deployment parameters, rendered service XML, databases,
 logs, credentials, founder handoffs, machine inventories, and local evidence
 remain outside the public release.
 
+Observed state differs from this intended clean-export boundary: the public Git
+history currently includes several operational evidence paths listed above.
+Reachable-history scanning reports no known credential patterns, but the owner
+must accept that history after privacy review or approve a clean/sanitized
+replacement before declaring a supported release.
+
 ## npm Artifact Boundary
 
 The tarball allowlist is:
@@ -40,8 +47,9 @@ The tarball allowlist is:
 The artifact intentionally excludes source, tests, docs, infrastructure,
 service templates, PowerShell scripts, verification records, and machine-local
 state. README paths into source documentation are plain repository references,
-not packaged-file links. Owner-approved public repository metadata and absolute
-documentation URLs are required before npm publication.
+not packaged-file links. Package metadata points installed-package readers to
+the public repository, README, and issue tracker; npm publication remains
+disabled.
 
 ## Required Local Checks
 
@@ -86,20 +94,19 @@ These checks require explicit authority and are not implied by local success:
 - create or verify a clean public Git history/export and rerun the history
   secret scan on the exact release object;
 - set a concrete private vulnerability-reporting contact/channel;
-- add the approved public `repository`, `homepage`, and `bugs` package metadata
-  so installed-package readers can reach the canonical documentation;
 - remove `private: true`, choose npm access/tag, and publish the exact reviewed
   tarball;
-- change repository visibility or push release commits/tags;
+- create an approved version tag and GitHub release if that distribution path
+  is selected;
 - review Azure `what-if`, identity inventory, network exposure, RBAC, budget,
   and diagnostic settings before deployment;
 - install/restart services or change any live node;
 - prove a signed round trip, restart recovery, duplicate handling, and
   revocation across real authorized machines.
 
-Publication, Azure deployment, RBAC mutation, repository visibility, and live
-cutover are distinct approval events. None is a side effect of the local
-release checks.
+Package or release publication, history replacement, Azure deployment, RBAC
+mutation, and live cutover are distinct approval events. None is a side effect
+of the local release checks.
 
 ## Release Decision Record
 
