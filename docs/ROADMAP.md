@@ -158,8 +158,8 @@ operations.
 
 ## Phase 6: Public-State And Identity Closure
 
-Status: locally implemented and verified on 2026-08-26. Git delivery is
-pending.
+Status: implemented, verified, and merged through PR #3 as `650c1773` on
+2026-08-26.
 
 - Enforce `BALCONY_SYSTEM_ID` for `identity --node-id` and `setup --node-id`
   before either command creates directories, credentials, profiles, or
