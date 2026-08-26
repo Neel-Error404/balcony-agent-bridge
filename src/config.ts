@@ -481,7 +481,9 @@ export function assertConfigMatchesProcessIdentity(
   config: BridgeConfig,
   environment: NodeJS.ProcessEnv = process.env,
 ): BridgeConfig {
-  assertSystemIdMatchesProcessIdentity(config.systemId, environment);
+  if (environment["BALCONY_SYSTEM_ID"] !== undefined) {
+    assertSystemIdMatchesProcessIdentity(config.systemId, environment);
+  }
   return config;
 }
 
@@ -491,7 +493,9 @@ export function assertSystemIdMatchesProcessIdentity(
 ): SystemId {
   const processIdentity = environment["BALCONY_SYSTEM_ID"];
   if (processIdentity === undefined) {
-    return systemId;
+    throw new ConfigurationError(
+      "BALCONY_SYSTEM_ID is required for node provisioning",
+    );
   }
   const parsedIdentity = SystemIdSchema.safeParse(processIdentity);
   if (!parsedIdentity.success || parsedIdentity.data !== systemId) {

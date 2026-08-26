@@ -12,6 +12,10 @@ function read(relativePath: string): string {
 describe("public alpha documentation contract", () => {
   it("publishes one ordered operator path from install through recovery", () => {
     const readme = read("README.md");
+    const cliSource = read("src/cli/index.ts");
+    const messageAuthentication = read("docs/message-authentication.md");
+    const roadmap = read("docs/ROADMAP.md");
+    const windowsRunbook = read("docs/runbooks/windows-service.md");
     const headings = [
       "## Install",
       "## Try The Local Demo",
@@ -36,9 +40,15 @@ describe("public alpha documentation contract", () => {
     expect(readme).toContain(
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
-    expect(readme).toContain("--subscription bridge-build");
+    expect(readme).toContain("--subscription build-node");
+    expect(windowsRunbook).toContain('SubscriptionName = "build-node"');
+    expect(roadmap).not.toContain("Git delivery is pending");
     expect(readme).toContain('$env:BALCONY_SYSTEM_ID = "laptop-a"');
     expect(readme).toContain('$env:BALCONY_SYSTEM_ID = "build-node"');
+    expect(cliSource).toContain('$env:BALCONY_SYSTEM_ID="laptop-a";');
+    expect(messageAuthentication).toContain(
+      '$env:BALCONY_SYSTEM_ID = "laptop-a"',
+    );
   });
 
   it("ships the minimum source documentation for an operator decision", () => {

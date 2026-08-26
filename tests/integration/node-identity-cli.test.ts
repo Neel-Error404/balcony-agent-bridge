@@ -7,13 +7,22 @@ import { describe, expect, it } from "vitest";
 import { createSecureIdentityDirectory } from "../helpers/windows-identity-directory.js";
 
 describe("node identity CLI", () => {
-  it(
-    "rejects a node ID that differs from the process identity before writing",
-    () => {
+  it.each([
+    { label: "is missing", processIdentity: undefined },
+    { label: "differs", processIdentity: "node-b" },
+  ])(
+    "rejects a node ID when the process identity $label before writing",
+    ({ processIdentity }) => {
       const outputDirectory = createSecureIdentityDirectory(
         "bridge-identity-mismatch-",
-      );
-      try {
+        );
+        try {
+          const environment = { ...process.env };
+          if (processIdentity === undefined) {
+            delete environment["BALCONY_SYSTEM_ID"];
+          } else {
+            environment["BALCONY_SYSTEM_ID"] = processIdentity;
+          }
         const result = spawnSync(
           process.execPath,
           [
@@ -29,10 +38,7 @@ describe("node identity CLI", () => {
           {
             cwd: path.resolve(import.meta.dirname, "../.."),
             encoding: "utf8",
-            env: {
-              ...process.env,
-              BALCONY_SYSTEM_ID: "node-b",
-            },
+            env: environment,
           },
         );
 

@@ -50,8 +50,8 @@ Identity options:
 
 Examples:
   balcony-agent-bridge demo
-  balcony-agent-bridge identity --node-id laptop-a --output-directory C:\\path\\to\\identity
-  balcony-agent-bridge setup --node-id laptop-a --authorized-node laptop-b
+  $env:BALCONY_SYSTEM_ID="laptop-a"; balcony-agent-bridge identity --node-id laptop-a --output-directory C:\\path\\to\\identity
+  $env:BALCONY_SYSTEM_ID="laptop-a"; balcony-agent-bridge setup --node-id laptop-a --authorized-node laptop-b
   balcony-agent-bridge doctor --config C:\\path\\to\\config.json
 `;
 
