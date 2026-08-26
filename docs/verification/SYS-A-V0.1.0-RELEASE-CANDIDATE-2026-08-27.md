@@ -14,6 +14,29 @@ The rollback/base point is
 `6ccbcb4bec29fb86ab1582faea54a237174e36a4`, and
 `a9a6a6bb354851b142889c77afa9672b205dbe78`.
 
+This file is the durable, sanitized record of the command invocations, exit
+status, counts, and result summaries for the local freeze. The tables below are
+the source-linked verification record for the requirements in the
+[v0.1 release manifest](../release-manifest-v0.1.md). Raw session captures
+remain outside the repository because they contain machine-local paths; they
+are not publication evidence.
+
+## Owner decision and release targets
+
+- Owner decision recorded in the release manifest on 2026-08-26: approve
+  public npm publication, a `v0.1.0` Git tag and GitHub Release, retained
+  public history, private vulnerability reporting, and a separately gated live
+  multi-node rollout.
+- Phase 1A decision on 2026-08-27: approve local release-candidate verification
+  and its evidence commit only. Phase 1A approval does not execute Phase 1B
+  publication, despite the prior release approval.
+- npm registry target: the public npm registry, package
+  `balcony-agent-bridge@0.1.0`.
+- GitHub repository/release target: `Neel-Error404/balcony-agent-bridge`, tag
+  and release `v0.1.0`.
+- Rollback point: `ee569936473f17c23a9f3a4c2c2ea1a97fe640d9`, as recorded
+  above. No rollback operation was performed.
+
 ## Required local check results
 
 Every command ran with process-scoped `BALCONY_SYSTEM_ID=SYS-A`. The test
@@ -88,13 +111,18 @@ created tarball.
 The observed tarball contained only the declared package surfaces: compiled
 `dist/**`, `README.md`, `LICENSE`, `SECURITY.md`, `package.json`, and the two
 sanitized configuration examples. It did not contain `docs/verification/**`.
-The required post-evidence-commit pack comparison is deliberately not claimed
-in this pre-commit record; it is a closure gate to run after this file is
-committed, without amending the source or evidence commits.
+
+`OBSERVED`: After evidence commit
+`733e1c3e6b3193d6e9eeb15b0faf6906cbf1b4da` was committed, a new
+`npm pack --json` artifact was compared with the preserved artifact from source
+commit `a9a6a6bb354851b142889c77afa9672b205dbe78`. Filename, npm SHA-1
+shasum, independently computed SHA-256, npm SHA-512 integrity, file count,
+packed size, and unpacked size all matched exactly. Tar inspection found zero
+`docs/verification/**` entries.
 
 ## Failure history and disposition
 
-`HANDOFF-REPORTED`: The first Phase 1A foundation run failed because the
+`OBSERVED-IN-THIS-PHASE`: The first Phase 1A foundation run failed because the
 Windows ACL behavior child inherited Vitest's five-second per-test timeout.
 Diagnosis reproduced the timeout under contention. Commit
 `a9a6a6bb354851b142889c77afa9672b205dbe78` added a 15-second child-process
@@ -111,6 +139,25 @@ unexplained first failure remains a release-quality concern, although it was
 not reproducible in those two runs. In this freeze, command output and
 check-level results were retained, and the single required
 `verify:public-alpha` run passed; it was not retried to hide a failure.
+
+## Independent review findings and dispositions
+
+- Task 1 specification review found stale contradictory CLI guidance. Commit
+  `6ccbcb4bec29fb86ab1582faea54a237174e36a4` removed the contradiction;
+  Task 1 re-review and quality review then passed.
+- The ACL timeout correction in
+  `a9a6a6bb354851b142889c77afa9672b205dbe78` received specification and
+  quality approval after the red/green, stress, isolated, and foundation
+  evidence described above.
+- This Task 2 specification review found omissions in the durable evidence
+  record: the completed post-commit package comparison, release-decision
+  fields, review dispositions, provenance, and the ACL history label were
+  incomplete or missing. This follow-up documentation-only commit corrects
+  those omissions. The pending re-review has not passed and is not claimed as
+  complete.
+
+The retained-public-history decision and its separate review evidence are in
+[the v0.1.0 history privacy review](./SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md).
 
 ## Proof limits and unchanged state
 
