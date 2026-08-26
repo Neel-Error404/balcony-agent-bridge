@@ -37,6 +37,8 @@ describe("public alpha documentation contract", () => {
     expect(readme).toContain("npm run verify:public-alpha");
     expect(readme).toContain("npm install --global balcony-agent-bridge@0.1.0");
     expect(readme).toContain("production service installation remains a reviewed source");
+    expect(readme).toContain("balcony-agent-bridge demo");
+    expect(readme).toContain("replace that command with\n`node $bridgeCli`");
     expect(readme).toContain(
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );

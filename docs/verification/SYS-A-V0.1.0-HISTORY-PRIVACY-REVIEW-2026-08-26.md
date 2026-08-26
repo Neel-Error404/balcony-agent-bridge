@@ -2,8 +2,8 @@
 
 Date: 2026-08-26
 
-System: `[SYS-A]` (inferred from the D-drive workspace because the process
-environment did not define `BALCONY_SYSTEM_ID`)
+System: `[SYS-A]` (`BALCONY_SYSTEM_ID=SYS-A` was set explicitly for the final
+verification commands)
 
 Reviewed candidate: `498047b998e1e0851782e354278b7800e93043ef` plus the
 evidence-only corrections that add this record
@@ -36,6 +36,9 @@ notes, and machine-oriented runbooks.
   they contain no credential value or user-profile secret.
 - Remaining UUIDs are synthetic fixtures or operational message identifiers;
   none matches the active Azure tenant identifier.
+- `gh api repos/Neel-Error404/balcony-agent-bridge/private-vulnerability-reporting`
+  returned `enabled: true` on 2026-08-26 after the owner-authorized setting was
+  enabled.
 
 ## Decision And Residual Risk
 

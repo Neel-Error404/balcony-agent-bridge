@@ -48,6 +48,10 @@ $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
 node $bridgeCli --help
 ```
 
+The remaining examples use the installed `balcony-agent-bridge` command. When
+working only from the source checkout, replace that command with
+`node $bridgeCli`.
+
 To evaluate the exact npm artifact from a source checkout:
 
 ```powershell
@@ -87,7 +91,7 @@ configuration.
 Run the deterministic three-node round trip before configuring Azure:
 
 ```powershell
-node $bridgeCli demo
+balcony-agent-bridge demo
 ```
 
 The expected JSON contains `"result":"passed"` and `"azure_used":false`.
@@ -102,7 +106,7 @@ SQLite database:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "laptop-a"
-node $bridgeCli setup `
+balcony-agent-bridge setup `
   --node-id laptop-a `
   --authorized-node laptop-b `
   --authorized-node build-node
@@ -155,7 +159,7 @@ ACL procedure in `docs/message-authentication.md` for the same output directory:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-node .\dist\cli\index.js identity `
+balcony-agent-bridge identity `
   --node-id build-node `
   --output-directory "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node-identity"
 ```
@@ -184,7 +188,7 @@ but before it is started, create the matching production profile:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-node .\dist\cli\index.js setup `
+balcony-agent-bridge setup `
   --config "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node.json" `
   --database "$env:ProgramData\Balcony\AgentBridge\data\bridge.sqlite3" `
   --node-id build-node `
@@ -219,15 +223,15 @@ isolated validation invocation of the bridge service entrypoint, so the CLI
 process does not load signing material:
 
 ```powershell
-node .\dist\cli\index.js doctor --config "C:\absolute\path\config.json"
-node .\dist\cli\index.js status --config "C:\absolute\path\config.json"
+balcony-agent-bridge doctor --config "C:\absolute\path\config.json"
+balcony-agent-bridge status --config "C:\absolute\path\config.json"
 ```
 
 After Azure identity and RBAC are ready, explicitly probe only the sender
 link:
 
 ```powershell
-node .\dist\cli\index.js doctor `
+balcony-agent-bridge doctor `
   --config "C:\absolute\path\config.json" `
   --check-transport
 ```
