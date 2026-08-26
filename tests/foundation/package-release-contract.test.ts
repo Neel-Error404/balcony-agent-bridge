@@ -39,8 +39,8 @@ describe("npm release boundary", () => {
       "SECURITY.md",
     ]);
     expect(manifest.bin).toEqual({
-      "balcony-agent-bridge": "./dist/cli/index.js",
-      "balcony-agent-bridge-mcp": "./dist/mcp/index.js",
+      "balcony-agent-bridge": "dist/cli/index.js",
+      "balcony-agent-bridge-mcp": "dist/mcp/index.js",
     });
     expect(manifest.engines).toEqual({ node: ">=22.0.0", npm: ">=10.0.0" });
     expect(manifest.repository).toEqual({

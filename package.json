@@ -23,8 +23,8 @@
     "SECURITY.md"
   ],
   "bin": {
-    "balcony-agent-bridge": "./dist/cli/index.js",
-    "balcony-agent-bridge-mcp": "./dist/mcp/index.js"
+    "balcony-agent-bridge": "dist/cli/index.js",
+    "balcony-agent-bridge-mcp": "dist/mcp/index.js"
   },
   "engines": {
     "node": ">=22.0.0",
