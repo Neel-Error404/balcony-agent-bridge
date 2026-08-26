@@ -35,8 +35,8 @@ describe("public alpha documentation contract", () => {
     }
 
     expect(readme).toContain("npm run verify:public-alpha");
-    expect(readme).toContain("private: true");
-    expect(readme).toContain("does not publish");
+    expect(readme).toContain("npm install --global balcony-agent-bridge@0.1.0");
+    expect(readme).toContain("production service installation remains a reviewed source");
     expect(readme).toContain(
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
@@ -103,6 +103,16 @@ describe("public alpha documentation contract", () => {
     const contributing = read("CONTRIBUTING.md");
     expect(contributing).toContain("Apache-2.0");
     expect(contributing).not.toContain("Until a license is selected");
+  });
+
+  it("allows only an explicitly public npm publication", () => {
+    const packageJson = JSON.parse(read("package.json")) as {
+      private?: boolean;
+      publishConfig?: { access?: string };
+    };
+
+    expect(packageJson.private).not.toBe(true);
+    expect(packageJson.publishConfig?.access).toBe("public");
   });
 
   it("keeps bridge credentials out of the dispatcher environment example", () => {

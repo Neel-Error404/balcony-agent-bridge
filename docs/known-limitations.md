@@ -31,16 +31,15 @@ the smaller static design.
   work; schema v7 marks all remaining legacy inbox rows as unauthenticated so
   they cannot authorize new continuation work.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
-  it is accepted for the local Phase 5 gate but is not evidence from a separate
-  clean OS/VM. The repository is public, but no npm package, GitHub release, or
-  version tag has been published; consumers currently build from source.
-- GitHub private vulnerability reporting is not enabled and no concrete
-  private fallback contact is published. Follow `SECURITY.md` without putting
-  sensitive details in a public issue.
-- The repository became public before its planned clean-export boundary was
-  reconciled. Reachable-history secret scanning reports no known credential
-  patterns, but operational handoff and verification records remain visible in
-  history and require an explicit owner decision before a supported release.
+  it is not evidence from a separate clean OS/VM. Version `0.1.0` is a public
+  alpha package and GitHub release, not a production-service support promise.
+- GitHub private vulnerability reporting is enabled. Follow `SECURITY.md` and
+  never put sensitive vulnerability details in a public issue.
+- The owner accepted the existing public Git history for `v0.1.0` after a
+  dedicated review found no live tenant identifier, credential, private key,
+  connection string, token, or non-example Service Bus hostname. Operational
+  handoff and verification records remain intentionally public; the automated
+  scan cannot prove the absence of every unknown secret format.
 - A live signed three-machine acceptance test has not been performed on this
   candidate.
 

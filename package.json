@@ -1,7 +1,6 @@
 {
   "name": "balcony-agent-bridge",
   "version": "0.1.0",
-  "private": true,
   "license": "Apache-2.0",
   "description": "Durable MCP bridge for secret-safe coordination between coding agents",
   "repository": {
@@ -11,6 +10,9 @@
   "homepage": "https://github.com/Neel-Error404/balcony-agent-bridge#readme",
   "bugs": {
     "url": "https://github.com/Neel-Error404/balcony-agent-bridge/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
   "files": [

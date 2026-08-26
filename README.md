@@ -10,10 +10,12 @@ authorized nodes, direct one-to-one routing, one production transport, and an
 optional read-only Codex dispatcher. It is not a hosted discovery service, a
 file-sync product, or a writable remote-execution platform.
 
-This repository is a public source alpha under Apache-2.0. Anyone may clone,
-build, inspect, modify, and use it under that license. Version `0.1.0` is not
-published to npm and remains `private: true`, so installation is currently from
-source or a locally built tarball rather than a public package registry.
+This repository and the `balcony-agent-bridge` package are a public `0.1.0`
+alpha under Apache-2.0. Anyone may clone, build, inspect, modify, and use it
+under that license. The package is published publicly on npm for local CLI and
+MCP evaluation; production service installation remains a reviewed source
+operation because the npm artifact intentionally excludes infrastructure and
+Windows service-management scripts.
 
 ## Install
 
@@ -26,6 +28,13 @@ Requirements:
 - Azure access only when deliberately deploying or checking the production
   transport.
 
+Install the public CLI and MCP package:
+
+```powershell
+npm install --global balcony-agent-bridge@0.1.0
+balcony-agent-bridge --help
+```
+
 From a source checkout:
 
 ```powershell
@@ -37,7 +46,7 @@ $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
 node $bridgeCli --help
 ```
 
-To evaluate the exact npm artifact without publishing it:
+To evaluate the exact npm artifact from a source checkout:
 
 ```powershell
 npm pack
@@ -337,10 +346,9 @@ level. `docs/release-manifest-v0.1.md` separates locally verifiable checks from
 owner-gated Git history, publication, Azure, service, and live multi-node
 checks.
 
-The source repository is public. The npm package remains unpublished and
-`private: true`; these commands do not publish, deploy, install a service,
-change RBAC, or alter a live bridge. See `SECURITY.md` before reporting a
-vulnerability and `docs/ROADMAP.md` for the implementation journey and current
-release gates.
+The source repository and `0.1.0` npm package are public. The commands above do
+not deploy Azure resources, install a service, change RBAC, or alter a live
+bridge. See `SECURITY.md` before reporting a vulnerability and
+`docs/ROADMAP.md` for the implementation journey and current release gates.
 
 The local verification workflow does not publish anything.
