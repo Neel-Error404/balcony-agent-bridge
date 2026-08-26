@@ -167,14 +167,39 @@ configuration, service health, or production operation. Local logs and the
 comparison artifact remain outside the repository and are not publication
 evidence.
 
-The following remain unchanged and unproven by this work:
+The owner-gated checks from the release manifest have the following explicit
+status:
 
-- PR push, review comments, and merge;
-- npm publication;
-- Git tag and GitHub Release creation;
-- Azure resources, networking, RBAC, identities, and budgets;
-- service installation, restart, or configuration;
-- any live or multi-node rollout.
+- `VERIFIED IN THIS PHASE` - The current-tree and reachable-history scan ran
+  on the exact source candidate
+  `a9a6a6bb354851b142889c77afa9672b205dbe78` through
+  `npm run check:secrets`: 184 files scanned, 0 findings.
+- `VERIFIED IN THIS PHASE` - GitHub private vulnerability reporting was
+  independently checked through the GitHub API and was enabled. No token or
+  sensitive API output is retained in this record.
+- `UNVERIFIED / DEFERRED` - Owner review of the complete exact release diff and
+  public inclusion boundary. Current reviews cover the incremental Phase 1A
+  changes and artifact contents, not a renewed owner review of the whole PR
+  diff.
+- `UNVERIFIED / DEFERRED` - PR push, review comments, fresh remote review, and
+  merge.
+- `UNVERIFIED / DEFERRED` - npm publication with public access and subsequent
+  registry installation of the published package.
+- `UNVERIFIED / DEFERRED` - Creation of the approved `v0.1.0` Git tag and
+  GitHub Release.
+- `UNVERIFIED / DEFERRED` - Azure `what-if`, identity inventory, network
+  exposure, RBAC, budget, and diagnostic-settings review, plus any resulting
+  Azure change.
+- `UNVERIFIED / DEFERRED` - Service installation, restart, configuration, or
+  change to a live node.
+- `UNVERIFIED / DEFERRED` - A signed live round trip, restart recovery,
+  duplicate handling, revocation, and multi-node acceptance across real
+  authorized machines.
+
+The prior owner approval permits later gated operations; it is not evidence
+that publication, release creation, deployment, service mutation, or live
+acceptance has been completed. Each operation requires its own execution and
+verification evidence.
 
 No product source, tests, README, configuration, infrastructure, or scripts
 were changed for this evidence task.
