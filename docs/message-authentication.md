@@ -27,6 +27,7 @@ $grants = @(
 & icacls.exe $identityRoot /inheritance:r /grant:r $grants
 if ($LASTEXITCODE -ne 0) { throw "Unable to restrict identity directory ACL." }
 
+$env:BALCONY_SYSTEM_ID = "laptop-a"
 balcony-agent-bridge identity `
   --node-id laptop-a `
   --output-directory $identityRoot
