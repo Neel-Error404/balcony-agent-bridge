@@ -167,6 +167,15 @@ configuration, service health, or production operation. Local logs and the
 comparison artifact remain outside the repository and are not publication
 evidence.
 
+`OBSERVED / ACCEPTED`: The complete
+[known limitations](../known-limitations.md) as it existed at source commit
+`a9a6a6bb354851b142889c77afa9672b205dbe78` was reviewed and remains
+accepted for this candidate. That document is the canonical full limitations
+list, including at-least-once behavior and replay after lost deduplication
+state, the whole-project and current v0.1 disclosure boundaries, static
+revocation and configuration behavior, and forward-only migration. These are
+accepted limitations, not claims that they were fixed.
+
 The owner-gated checks from the release manifest have the following explicit
 status:
 
