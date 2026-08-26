@@ -84,10 +84,17 @@ describe("public alpha documentation contract", () => {
       "docs/release-manifest-v0.1.md": [
         "# v0.1 Public Alpha Release Manifest",
         "## Included Source Surfaces",
+        "### v0.1 GitHub Source-Archive Exception",
         "## npm Artifact Boundary",
         "## Required Local Checks",
         "## Owner-Gated Checks",
         "## Release Decision Record",
+      ],
+      "docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md": [
+        "# SYS-A v0.1.0 History And Privacy Review",
+        "Decision: retain the existing public Git history for `v0.1.0`",
+        "## Evidence",
+        "## Decision And Residual Risk",
       ],
     };
 

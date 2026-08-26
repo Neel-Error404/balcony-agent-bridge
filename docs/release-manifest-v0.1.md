@@ -31,13 +31,23 @@ Private profiles, deployment parameters, rendered service XML, databases,
 logs, credentials, founder handoffs, machine inventories, and local evidence
 remain outside the public release.
 
+### v0.1 GitHub Source-Archive Exception
+
+The owner accepted the already-public repository tree as the `v0.1.0` GitHub
+source archive. It includes `AGENTS.md`, `docs/handoff/**`,
+`docs/verification/**`, `docs/plans/**`, `docs/costs.md`, and
+`docs/runbooks/sys-a-physical-host.md` as an explicit exception to the original
+clean-export plan. This exception applies only to the GitHub source archive;
+none of those paths is permitted in the npm artifact.
+
 Observed state differs from the original clean-export boundary: public Git
 history includes operational evidence paths listed above. The owner accepted
 that existing history for `v0.1.0` after a dedicated review found no live cloud
 tenant identifier, credential, private key, connection string, access token,
 non-example Service Bus hostname, or user-profile credential path. Rewriting
 already-public history was rejected because it would break clones without
-retracting existing copies.
+retracting existing copies. The supporting evidence is recorded in
+`docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md`.
 
 ## npm Artifact Boundary
 

@@ -75,7 +75,8 @@ would break existing clones and references without retracting copies already
 made. Reachable-history scanning remains a release gate, but it cannot prove
 the absence of every unknown secret format. A future confirmed exposure must
 be handled as an incident with credential revocation first; history rewriting
-alone is not credential remediation.
+alone is not credential remediation. The dated review record is
+`docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md`.
 
 ## Current Gate
 
@@ -95,5 +96,6 @@ that no unknown secret format exists; manual review remains required.
 
 The owner selected the Apache License 2.0 on 2026-08-25 because its explicit
 patent grant gives infrastructure contributors and adopters clearer protection.
-The public source is governed by that license. Package publication remains
-separately owner-gated while the npm package is marked `private`.
+The public source is governed by that license. Public `0.1.0` npm publication
+is approved but is not complete until the registry returns the released
+version.
