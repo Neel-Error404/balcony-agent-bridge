@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertConfigMatchesProcessIdentity,
   loadConfig,
   loadMessageAuthenticationRuntimeConfig,
   loadReadOnlyDispatcherConfig,
@@ -119,6 +120,27 @@ describe("bridge configuration", () => {
       "22222222-2222-4222-8222-222222222222",
     );
     expect(config.azureClientCertificatePath).toContain("sys-a.pem");
+  });
+
+  it("binds explicit local profiles to the process-scoped identity", () => {
+    const config = loadConfig({
+      BALCONY_SYSTEM_ID: "node-a",
+      BALCONY_AUTHORIZED_NODE_IDS: "node-b",
+    });
+
+    expect(
+      assertConfigMatchesProcessIdentity(config, {
+        BALCONY_SYSTEM_ID: "node-a",
+      }),
+    ).toBe(config);
+    expect(assertConfigMatchesProcessIdentity(config, {})).toBe(config);
+    for (const processIdentity of ["node-b", "invalid identity"]) {
+      expect(() =>
+        assertConfigMatchesProcessIdentity(config, {
+          BALCONY_SYSTEM_ID: processIdentity,
+        }),
+      ).toThrow(/profile identity does not match process identity/i);
+    }
   });
 
   it("rejects mixed or incomplete Azure identity environment fields", () => {

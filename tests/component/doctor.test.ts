@@ -10,6 +10,7 @@ import { runDoctor } from "../../src/cli/doctor.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
 
 const temporaryDirectories: string[] = [];
+const validMessageAuthenticationProbe = (): void => undefined;
 
 describe("bridge doctor", () => {
   afterEach(() => {
@@ -22,6 +23,7 @@ describe("bridge doctor", () => {
     const databasePath = createHealthyDatabase();
     const report = await runDoctor({
       loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
     });
@@ -42,6 +44,7 @@ describe("bridge doctor", () => {
           status: "skipped",
           code: "LOCAL_ONLY",
         },
+        { name: "message_authentication", status: "pass" },
         { name: "database", status: "pass" },
         { name: "transport_send_link", status: "skipped", code: "NOT_REQUESTED" },
       ],
@@ -54,6 +57,7 @@ describe("bridge doctor", () => {
     const databasePath = createHealthyDatabase({ includeSignedIngressMigration: false });
     const report = await runDoctor({
       loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
     });
@@ -72,6 +76,7 @@ describe("bridge doctor", () => {
     const databasePath = createIncompleteDatabase();
     const report = await runDoctor({
       loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
     });
@@ -98,6 +103,7 @@ describe("bridge doctor", () => {
 
     const report = await runDoctor({
       loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
     });
@@ -123,6 +129,7 @@ describe("bridge doctor", () => {
     try {
       const report = await runDoctor({
         loadConfig: () => config(databasePath),
+        messageAuthenticationProbe: validMessageAuthenticationProbe,
         nodeVersion: "v22.0.0",
       });
 
@@ -147,6 +154,7 @@ describe("bridge doctor", () => {
     const report = await runDoctor({
       checkTransport: true,
       loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
       transportProbe: async () => {
@@ -170,6 +178,7 @@ describe("bridge doctor", () => {
     const report = await runDoctor({
       checkTransport: true,
       loadConfig: () => config(databasePath, "configured.servicebus.windows.net"),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
       transportProbe: async (_config, signal) => {
@@ -205,6 +214,7 @@ describe("bridge doctor", () => {
           "missing.pem",
         ),
       }),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
       nodeVersion: "v22.0.0",
       runtimeFiles: [databasePath],
       transportProbe: async () => {
@@ -222,8 +232,44 @@ describe("bridge doctor", () => {
     expect(report.checks).toContainEqual({
       name: "transport_send_link",
       status: "skipped",
-      code: "IDENTITY_CONFIGURATION_UNAVAILABLE",
+      code: "RUNTIME_CONFIGURATION_UNAVAILABLE",
     });
+  });
+
+  it("fails safely when mandatory message authentication is unavailable", async () => {
+    const databasePath = createHealthyDatabase();
+    let transportProbeCalls = 0;
+    const report = await runDoctor({
+      checkTransport: true,
+      loadConfig: () => config(
+        databasePath,
+        "configured.servicebus.windows.net",
+      ),
+      messageAuthenticationProbe: () => {
+        throw new Error("private membership path and signing key detail");
+      },
+      nodeVersion: "v22.0.0",
+      runtimeFiles: [databasePath],
+      transportProbe: async () => {
+        transportProbeCalls += 1;
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.exitCode).toBe(1);
+    expect(transportProbeCalls).toBe(0);
+    expect(report.checks).toContainEqual({
+      name: "message_authentication",
+      status: "fail",
+      code: "MESSAGE_AUTHENTICATION_INVALID",
+    });
+    expect(report.checks).toContainEqual({
+      name: "transport_send_link",
+      status: "skipped",
+      code: "RUNTIME_CONFIGURATION_UNAVAILABLE",
+    });
+    expect(JSON.stringify(report)).not.toContain("membership path");
+    expect(JSON.stringify(report)).not.toContain("signing key");
   });
 });
 

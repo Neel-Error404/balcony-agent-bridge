@@ -246,6 +246,7 @@ if ($PSCmdlet.ParameterSetName -eq "ClientCertificate") {
     Assert-TrustedRuntimePath -Path $AzureClientCertificatePath
 }
 Assert-NoUntrustedWriteAccess -Path $MessageAuthenticationMembershipPath
+Assert-BridgeServiceLocalSystemReadAccess -Path $MessageAuthenticationMembershipPath
 Assert-NoUntrustedWriteAccess -Path $RepositoryRoot
 Assert-NoUntrustedWriteAccess -Path $NodeExecutable
 Assert-NoUntrustedWriteAccess -Path $WinSwExecutable

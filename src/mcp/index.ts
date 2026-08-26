@@ -5,8 +5,11 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 
 import { AgentBridgeService } from "../application/agent-bridge-service.js";
-import { loadConfig, loadConfigFile } from "../config.js";
-import { ConfigurationError } from "../errors.js";
+import {
+  assertConfigMatchesProcessIdentity,
+  loadConfig,
+  loadConfigFile,
+} from "../config.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
 import { BridgeDatabase } from "../storage/database.js";
 import { createMcpServer } from "./server.js";
@@ -25,17 +28,10 @@ try {
     throw new Error("MCP --config path must be absolute");
   }
   const config = values.config
-    ? loadConfigFile(path.resolve(values.config))
+    ? assertConfigMatchesProcessIdentity(
+        loadConfigFile(path.resolve(values.config)),
+      )
     : loadConfig();
-  if (
-    values.config &&
-    process.env["BALCONY_SYSTEM_ID"] !== undefined &&
-    process.env["BALCONY_SYSTEM_ID"] !== config.systemId
-  ) {
-    throw new ConfigurationError(
-      "Explicit MCP profile identity does not match process identity",
-    );
-  }
   const database = new BridgeDatabase(config.databasePath);
   const service = new AgentBridgeService(config, database);
   const server = createMcpServer(service);

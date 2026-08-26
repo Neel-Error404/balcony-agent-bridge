@@ -61,6 +61,7 @@ function Set-RestrictedTestFileAcl {
 }
 
 $temporaryFile = [IO.Path]::GetTempFileName()
+$readableMembershipFile = [IO.Path]::GetTempFileName()
 $withoutSystemReadFile = [IO.Path]::GetTempFileName()
 $deniedSystemReadFile = [IO.Path]::GetTempFileName()
 $deniedServiceReadFile = [IO.Path]::GetTempFileName()
@@ -125,8 +126,23 @@ try {
     )
 
     Set-RestrictedTestFileAcl `
+        -Path $readableMembershipFile `
+        -TrustedIdentities $trustedIdentities `
+        -AdditionalRules $broadReadRule
+    Assert-BridgeServiceLocalSystemReadAccess -Path $readableMembershipFile
+
+    Set-RestrictedTestFileAcl `
         -Path $withoutSystemReadFile `
         -TrustedIdentities @($currentIdentity, $administratorsSid)
+    try {
+        Assert-BridgeServiceLocalSystemReadAccess -Path $withoutSystemReadFile
+        throw "Membership policy without LocalSystem read access was accepted."
+    }
+    catch {
+        if ($_.Exception.Message -ne "Service identity read validation failed.") {
+            throw
+        }
+    }
     try {
         Assert-BridgeServiceCredentialAcl `
             -Path $withoutSystemReadFile `
@@ -148,6 +164,15 @@ try {
         -Path $deniedSystemReadFile `
         -TrustedIdentities $trustedIdentities `
         -AdditionalRules $denyEveryoneReadRule
+    try {
+        Assert-BridgeServiceLocalSystemReadAccess -Path $deniedSystemReadFile
+        throw "Membership policy with denied LocalSystem read access was accepted."
+    }
+    catch {
+        if ($_.Exception.Message -ne "Service identity read validation failed.") {
+            throw
+        }
+    }
     try {
         Assert-BridgeServiceCredentialAcl `
             -Path $deniedSystemReadFile `
@@ -269,6 +294,7 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $temporaryFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $readableMembershipFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $withoutSystemReadFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $deniedSystemReadFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $deniedServiceReadFile -Force -ErrorAction SilentlyContinue

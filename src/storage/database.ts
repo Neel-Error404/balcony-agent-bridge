@@ -342,6 +342,7 @@ export class BridgeDatabase {
          FROM inbox
          WHERE causation_id = ?
            AND kind = 'task_result'
+           AND authenticated_ingress = 1
            AND origin_system = ?
            AND json_extract(envelope_json, '$.target_system') = ?
            AND json_extract(envelope_json, '$.conversation_id') = ?

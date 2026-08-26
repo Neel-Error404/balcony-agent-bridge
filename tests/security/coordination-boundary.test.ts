@@ -108,7 +108,7 @@ describe("coordination security boundary", () => {
         },
       },
     });
-    database.persistIncoming(wrongNodeReply, 1);
+    database.persistIncoming(wrongNodeReply, 1, new Date(), true);
 
     const waiting = await client.callTool({
       name: "agent_bridge_get_result",
@@ -138,7 +138,7 @@ describe("coordination security boundary", () => {
         },
       },
     });
-    database.persistIncoming(expectedReply, 1);
+    database.persistIncoming(expectedReply, 1, new Date(), true);
 
     const completed = await client.callTool({
       name: "agent_bridge_get_result",

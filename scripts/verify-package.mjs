@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -248,6 +249,19 @@ function runInstallSmoke(useCleanCache) {
     ) {
       throw new Error("Packaged CLI identity output was not public-safe");
     }
+    const membershipPath = path.join(identityDirectory, "membership.json");
+    fs.writeFileSync(
+      membershipPath,
+      `${JSON.stringify({
+        schema_version: "1.0",
+        network_id: "package-verification",
+        peers: [
+          packagePeerEnrollment("node-b"),
+          packagePeerEnrollment("node-c"),
+        ],
+      })}\n`,
+      { encoding: "utf8", mode: 0o600, flag: "wx" },
+    );
 
     const profilePath = path.join(temporaryDirectory, "profile", "config.json");
     const databasePath = path.join(
@@ -338,6 +352,16 @@ function runInstallSmoke(useCleanCache) {
       cliBin,
       ["doctor", "--config", profilePath],
       consumerDirectory,
+      {
+        env: {
+          ...process.env,
+          BALCONY_SYSTEM_ID: "node-a",
+          BALCONY_MESSAGE_AUTH_MODE: "ed25519",
+          BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH: membershipPath,
+          BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH:
+            identityPayload.signing_key_path,
+        },
+      },
     );
     requireExit(doctor, 0, "packaged CLI doctor");
     if (JSON.parse(doctor.stdout).ok !== true) {
@@ -355,6 +379,12 @@ function runInstallSmoke(useCleanCache) {
       cliBin,
       ["status", "--config", profilePath],
       consumerDirectory,
+      {
+        env: {
+          ...process.env,
+          BALCONY_SYSTEM_ID: "node-a",
+        },
+      },
     );
     requireExit(profileStatus, 0, "packaged CLI profile status");
     if (JSON.parse(profileStatus.stdout).system_id !== "node-a") {
@@ -401,6 +431,21 @@ function runInstallSmoke(useCleanCache) {
       retryDelay: 100,
     });
   }
+}
+
+function packagePeerEnrollment(nodeId) {
+  const pair = generateKeyPairSync("ed25519");
+  const spkiDer = pair.publicKey.export({ format: "der", type: "spki" });
+  return {
+    node_id: nodeId,
+    keys: [
+      {
+        key_id: `ed25519:${createHash("sha256").update(spkiDer).digest("base64url")}`,
+        spki_der_base64url: spkiDer.toString("base64url"),
+        status: "active",
+      },
+    ],
+  };
 }
 
 function createPackageIdentityDirectory() {

@@ -32,13 +32,15 @@ fails.
 | `DATABASE_UNAVAILABLE` | Stop writers and inspect filesystem access or SQLite open failures without replacing the database. |
 | `IDENTITY_CONFIGURATION_INVALID` | Supply exactly one supported Azure identity mode. |
 | `IDENTITY_CERTIFICATE_UNAVAILABLE` | Restore the approved absolute certificate path and ACL. |
+| `MESSAGE_AUTHENTICATION_INVALID` | Restore the required Ed25519 mode, exact membership policy, signing key, and service-readable file access. Do not enable unsigned fallback. |
 | `TRANSPORT_CONFIGURATION_MISSING` | Add approved namespace metadata before requesting `--check-transport`. |
+| `RUNTIME_CONFIGURATION_UNAVAILABLE` | Fix the failed identity or message-authentication check before probing Azure. |
 | `TRANSPORT_TIMEOUT` / `TRANSPORT_UNREACHABLE` | Check network, identity, topic sender RBAC, and namespace approval. |
 
 `identity_configuration: skipped` with `LOCAL_ONLY`, and
 `transport_send_link: skipped` with `NOT_REQUESTED`, are healthy local-only
-results. `--check-transport` opens a sender link but does not prove a receiving
-subscription or end-to-end delivery.
+results only when `message_authentication` passes. `--check-transport` opens a
+sender link but does not prove a receiving subscription or end-to-end delivery.
 
 ## Bridge Transport
 

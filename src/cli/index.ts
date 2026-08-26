@@ -5,7 +5,11 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { loadConfig, loadConfigFile } from "../config.js";
+import {
+  assertConfigMatchesProcessIdentity,
+  loadConfig,
+  loadConfigFile,
+} from "../config.js";
 import { NodeIdSchema } from "../contracts/envelope.js";
 import { generateNodeIdentity } from "../security/node-identity.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
@@ -226,10 +230,17 @@ async function runDoctorCommand(args: readonly string[]): Promise<void> {
   if (positionals.length > 0) {
     throw new CliUsageError("doctor does not accept positional arguments");
   }
+  const configPath = values.config
+    ? requireAbsolute(values.config, "--config")
+    : undefined;
   const report = await runDoctor({
     checkTransport: values["check-transport"] ?? false,
-    loadConfig: values.config
-      ? () => loadConfigFile(requireAbsolute(values.config!, "--config"))
+    ...(configPath === undefined ? {} : { configPath }),
+    loadConfig: configPath
+      ? () =>
+          assertConfigMatchesProcessIdentity(
+            loadConfigFile(configPath),
+          )
       : loadConfig,
   });
   writeJson(report);
@@ -247,7 +258,9 @@ function runStatus(args: readonly string[]): void {
     throw new CliUsageError("status does not accept positional arguments");
   }
   const config = values.config
-    ? loadConfigFile(requireAbsolute(values.config, "--config"))
+    ? assertConfigMatchesProcessIdentity(
+        loadConfigFile(requireAbsolute(values.config, "--config")),
+      )
     : loadConfig();
   const database = new BridgeDatabase(config.databasePath);
   try {

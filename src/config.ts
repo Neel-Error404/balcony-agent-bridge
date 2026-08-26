@@ -477,6 +477,23 @@ export function loadConfigFile(configPath: string): BridgeConfig {
   };
 }
 
+export function assertConfigMatchesProcessIdentity(
+  config: BridgeConfig,
+  environment: NodeJS.ProcessEnv = process.env,
+): BridgeConfig {
+  const processIdentity = environment["BALCONY_SYSTEM_ID"];
+  if (processIdentity === undefined) {
+    return config;
+  }
+  const parsedIdentity = SystemIdSchema.safeParse(processIdentity);
+  if (!parsedIdentity.success || parsedIdentity.data !== config.systemId) {
+    throw new ConfigurationError(
+      "Explicit local profile identity does not match process identity",
+    );
+  }
+  return config;
+}
+
 export function requireServiceBusNamespace(config: BridgeConfig): string {
   if (!config.serviceBusNamespace) {
     throw new ConfigurationError(

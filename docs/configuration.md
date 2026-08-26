@@ -9,6 +9,12 @@ Codex runtime settings and receives no Azure credentials.
 
 `balcony-agent-bridge setup` writes this JSON profile and initializes its
 database. Use the same profile for the MCP server, `doctor`, and `status`.
+When `BALCONY_SYSTEM_ID` is present, all three commands reject a profile for a
+different node. `doctor` additionally requires the bridge-only
+`BALCONY_MESSAGE_AUTH_*` variables so it can validate the membership policy
+and signing key through an isolated bridge-service validation invocation
+before reporting the service ready. The CLI process itself does not load the
+private key.
 
 | Field | Required | Meaning |
 |---|---:|---|

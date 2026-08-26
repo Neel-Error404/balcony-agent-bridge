@@ -159,7 +159,7 @@ describe("AgentBridgeService", () => {
         },
       },
     });
-    database.persistIncoming(reply, 1);
+    database.persistIncoming(reply, 1, new Date(), true);
 
     expect(service.getAgentResult(first.task_id)).toMatchObject({
       task_id: first.task_id,
@@ -348,7 +348,7 @@ describe("AgentBridgeService", () => {
     );
   });
 
-  it("rejects unauthenticated results as continuation authority", () => {
+  it("rejects unauthenticated results as completion or continuation authority", () => {
     const request = service.askAgent({
       idempotencyKey: "quarantined-result-request",
       targetNodeId: "SYS-B",
@@ -379,6 +379,16 @@ describe("AgentBridgeService", () => {
       },
     });
     database.persistIncoming(result, 1);
+
+    expect(service.getAgentResult(request.task_id)).toMatchObject({
+      task_id: request.task_id,
+      conversation_id: request.conversation_id,
+      status: "queued",
+      delivery_state: "pending",
+    });
+    expect(service.getAgentResult(request.task_id)).not.toHaveProperty(
+      "result_message_id",
+    );
 
     expect(() =>
       service.continueAgent({

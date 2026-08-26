@@ -185,7 +185,13 @@ runbook.
 
 ## Verify The Node
 
-Verify local runtime, profile, schema, and database integrity:
+Verify local runtime, profile, schema, database integrity, and mandatory message
+authentication readiness. Run `doctor` with the same
+`BALCONY_MESSAGE_AUTH_*` variables and process-scoped `BALCONY_SYSTEM_ID` that
+the bridge service will receive; `status` needs only the matching profile and
+process identity. `doctor` delegates the private-key readiness check to an
+isolated validation invocation of the bridge service entrypoint, so the CLI
+process does not load signing material:
 
 ```powershell
 node .\dist\cli\index.js doctor --config "C:\absolute\path\config.json"

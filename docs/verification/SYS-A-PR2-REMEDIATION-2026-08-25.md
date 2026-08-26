@@ -109,3 +109,53 @@ in PR #2 and the vault project summary; they cannot be self-recorded inside
 the commit that creates that SHA. Public visibility, npm publication, Azure,
 RBAC, service installation, live multi-machine validation, and the merge
 itself remain separate owner-gated actions.
+
+## Follow-Up Review Remediation — 2026-08-26
+
+After commit `3104d1012d7250d6e7c0f2bc8a362921f7bc2a9d` was reviewed, four new
+inline findings were added to PR #2. The current local working tree addresses
+all four without widening the Phase 5 scope:
+
+- task-result lookup now requires authenticated ingress;
+- `status --config` and `doctor --config` enforce a configured
+  `BALCONY_SYSTEM_ID` through the same shared guard as MCP startup;
+- `doctor` validates the mandatory Ed25519 membership and signing-key runtime
+  using an isolated validation invocation of the production bridge entrypoint,
+  keeping the private key out of the general CLI process; and
+- Windows service installation requires the membership policy to be both
+  protected from untrusted writes and readable by LocalSystem, including
+  applicable deny-ACE handling.
+
+The updated ordered verification passed with 311 tests and one expected
+platform skip: foundation 100 passed, component 97 passed, integration 30
+passed, workflow 4 passed, recovery 22 passed, and security 58 passed.
+Type-check, build, MCP smoke, reachable-history secret scan, production
+dependency audit, package verification, isolated clean-cache consumer
+verification, PowerShell parsing, and diff hygiene also passed. The secret
+scan covered 182 files and reported zero findings. The package evidence is:
+
+```json
+{
+  "package_filename": "balcony-agent-bridge-0.1.0.tgz",
+  "package_shasum": "1982575aa9622bd046e1497e6b5dfc644ad3279f",
+  "package_integrity": "sha512-B46cntmKQ72wrv4AXBB30jJq5c3KxARG6/N6e999w/wnECimVNkFLgk4BSprJX9sL+nL+w2kJXvcOOxvDbcUqg==",
+  "package_file_count": 102,
+  "package_size_bytes": 123419,
+  "unpacked_size_bytes": 627635,
+  "install_smoke": "isolated-cache-network",
+  "consumer_environment": "disposable-empty-npm-project",
+  "dependency_tree": "valid",
+  "package_command": "npm-exec-offline"
+}
+```
+
+Codex Security diff scan `1869c0a5-271d-409f-96f5-ab13244e3ceb` completed
+against the captured local runtime patch before this evidence-only update,
+with seven closed security surfaces and zero findings. Its TAC/access-status connector was unavailable,
+which affects only protected-output status visibility, not the local scan.
+
+Live GitHub state at this checkpoint: the PR is open, non-draft,
+`MERGEABLE`, and `CLEAN`; the Devin Review status is successful. Five older
+threads are resolved and the four follow-up threads remain unresolved because
+the corrected tree is not yet committed or pushed. No new authorization to
+stage, commit, push, answer or resolve threads, or merge has been inferred.

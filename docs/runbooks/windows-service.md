@@ -64,7 +64,12 @@ Get-Service -Name BalconyAgentBridge
 Then use the compiled CLI from the same durable runtime to create the MCP
 profile with
 `--database "$env:ProgramData\Balcony\AgentBridge\data\bridge.sqlite3"`.
-Run `doctor` against that profile before starting the service.
+Run `doctor` against that profile before starting the service, from a shell
+with the same `BALCONY_SYSTEM_ID` and `BALCONY_MESSAGE_AUTH_*` values rendered
+for the service. A passing report therefore proves that the membership policy
+and signing key can be loaded by an isolated bridge-service validation
+invocation, not only that their paths were configured. The general CLI process
+does not load the private key.
 
 Start, inspect, and stop are explicit operator actions:
 

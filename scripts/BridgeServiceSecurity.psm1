@@ -21,23 +21,15 @@ function Test-BridgeServiceAccessRuleAppliesToItem {
         [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0)
 }
 
-function Assert-BridgeServiceCredentialAcl {
-    param(
-        [Parameter(Mandatory)] [string] $Path,
-        [Parameter(Mandatory)] [string[]] $TrustedSids
-    )
+function Assert-BridgeServiceLocalSystemReadAccess {
+    param([Parameter(Mandatory)] [string] $Path)
 
     try {
         $acl = Get-Acl -LiteralPath $Path
         $item = Get-Item -LiteralPath $Path -Force
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Credential ACL validation failed."
+            throw "Service identity read validation failed."
         }
-        $ownerSid = ConvertTo-BridgeServiceSid -IdentityReference $acl.Owner
-        if ($TrustedSids -notcontains $ownerSid) {
-            throw "Credential ACL validation failed."
-        }
-        $anyFileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl
         $requiredReadRights = [Security.AccessControl.FileSystemRights]::Read
         $localSystemSid = "S-1-5-18"
         $localSystemTokenSids = @(
@@ -58,14 +50,7 @@ function Assert-BridgeServiceCredentialAcl {
                 $localSystemTokenSids -contains $sid -and
                 (($rule.FileSystemRights -band $requiredReadRights) -ne 0)
             ) {
-                throw "Credential ACL validation failed."
-            }
-            if (
-                $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-                $TrustedSids -notcontains $sid -and
-                (($rule.FileSystemRights -band $anyFileSystemRights) -ne 0)
-            ) {
-                throw "Credential ACL validation failed."
+                throw "Service identity read validation failed."
             }
             if (
                 $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
@@ -76,7 +61,44 @@ function Assert-BridgeServiceCredentialAcl {
             }
         }
         if (-not $hasLocalSystemRead) {
+            throw "Service identity read validation failed."
+        }
+    }
+    catch {
+        throw "Service identity read validation failed."
+    }
+}
+
+function Assert-BridgeServiceCredentialAcl {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string[]] $TrustedSids
+    )
+
+    try {
+        Assert-BridgeServiceLocalSystemReadAccess -Path $Path
+        $acl = Get-Acl -LiteralPath $Path
+        $item = Get-Item -LiteralPath $Path -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Credential ACL validation failed."
+        }
+        $ownerSid = ConvertTo-BridgeServiceSid -IdentityReference $acl.Owner
+        if ($TrustedSids -notcontains $ownerSid) {
+            throw "Credential ACL validation failed."
+        }
+        $anyFileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl
+        foreach ($rule in $acl.Access) {
+            if (-not (Test-BridgeServiceAccessRuleAppliesToItem -Rule $rule)) {
+                continue
+            }
+            $sid = ConvertTo-BridgeServiceSid -IdentityReference $rule.IdentityReference
+            if (
+                $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+                $TrustedSids -notcontains $sid -and
+                (($rule.FileSystemRights -band $anyFileSystemRights) -ne 0)
+            ) {
+                throw "Credential ACL validation failed."
+            }
         }
     }
     catch {
@@ -166,6 +188,7 @@ function Assert-BridgeServiceRuntimePath {
 
 Export-ModuleMember -Function @(
     "ConvertTo-BridgeServiceSid",
+    "Assert-BridgeServiceLocalSystemReadAccess",
     "Assert-BridgeServiceCredentialAcl",
     "Assert-BridgeServiceRuntimeItem",
     "Assert-BridgeServiceRuntimePath"

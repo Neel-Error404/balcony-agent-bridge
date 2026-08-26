@@ -153,6 +153,9 @@ describe("Windows service installation contract", () => {
       "Assert-NoUntrustedWriteAccess -Path $MessageAuthenticationMembershipPath",
     );
     expect(installer).toContain(
+      "Assert-BridgeServiceLocalSystemReadAccess -Path $MessageAuthenticationMembershipPath",
+    );
+    expect(installer).toContain(
       "Assert-NoUntrustedWriteAccess -Path $RepositoryRoot",
     );
     expect(installer).toContain(
@@ -185,6 +188,9 @@ describe("Windows service installation contract", () => {
     expect(installer).toContain("Import-Module -Force -Name $bridgeServiceSecurityModule");
     expect(securityModule).toContain("function ConvertTo-BridgeServiceSid");
     expect(securityModule).toContain("function Assert-BridgeServiceCredentialAcl");
+    expect(securityModule).toContain(
+      "function Assert-BridgeServiceLocalSystemReadAccess",
+    );
     expect(securityModule).toContain("function Assert-BridgeServiceRuntimeItem");
     expect(securityModule).toContain("function Assert-BridgeServiceRuntimePath");
     expect(securityModule).toContain(

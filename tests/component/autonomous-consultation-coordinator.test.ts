@@ -233,7 +233,7 @@ describe("AutonomousConsultationCoordinator", () => {
       },
       now: now(9),
     });
-    database.persistIncoming(peerResult, 1, now(9));
+    database.persistIncoming(peerResult, 1, now(9), true);
 
     await coordinator.runOnce(now(14));
     expect(database.getConsultationRun(request.message_id)).toMatchObject({

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,11 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { ServiceBusClient } from "@azure/service-bus";
 
-import { loadConfig, requireServiceBusNamespace, type BridgeConfig } from "../config.js";
+import {
+  loadConfig,
+  requireServiceBusNamespace,
+  type BridgeConfig,
+} from "../config.js";
 import { CURRENT_SCHEMA_VERSION } from "../storage/database.js";
 import { createServiceBusCredential } from "../transport/service-bus-transport.js";
 
@@ -94,6 +99,7 @@ const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readon
   ],
 };
 const TRANSPORT_TIMEOUT_MS = 10_000;
+const MESSAGE_AUTHENTICATION_TIMEOUT_MS = 10_000;
 
 export type DoctorCheckStatus = "pass" | "fail" | "skipped";
 
@@ -102,6 +108,7 @@ export interface DoctorCheck {
     | "runtime_build"
     | "configuration"
     | "identity_configuration"
+    | "message_authentication"
     | "database"
     | "transport_send_link";
   status: DoctorCheckStatus;
@@ -121,11 +128,15 @@ export type DoctorTransportProbe = (
   signal: AbortSignal,
 ) => Promise<void>;
 
+export type DoctorMessageAuthenticationProbe = (config: BridgeConfig) => void;
+
 export interface DoctorOptions {
   checkTransport?: boolean;
+  configPath?: string;
   loadConfig?: () => BridgeConfig;
   nodeVersion?: string;
   runtimeFiles?: readonly string[];
+  messageAuthenticationProbe?: DoctorMessageAuthenticationProbe;
   transportProbe?: DoctorTransportProbe;
 }
 
@@ -145,6 +156,11 @@ export async function runDoctor(
       code: "CONFIGURATION_UNAVAILABLE",
     });
     checks.push({
+      name: "message_authentication",
+      status: "skipped",
+      code: "CONFIGURATION_UNAVAILABLE",
+    });
+    checks.push({
       name: "database",
       status: "skipped",
       code: "CONFIGURATION_UNAVAILABLE",
@@ -158,13 +174,21 @@ export async function runDoctor(
   }
 
   const identityCheck = inspectIdentity(configResult.config);
+  const messageAuthenticationCheck = inspectMessageAuthentication(
+    configResult.config,
+    options.messageAuthenticationProbe ?? ((config) =>
+      probeMessageAuthentication(config, options.configPath)),
+  );
   checks.push(identityCheck);
+  checks.push(messageAuthenticationCheck);
   checks.push(inspectDatabase(configResult.config.databasePath));
-  checks.push(identityCheck.status === "fail" && options.checkTransport
+  const runtimeConfigurationUnavailable =
+    identityCheck.status === "fail" || messageAuthenticationCheck.status === "fail";
+  checks.push(runtimeConfigurationUnavailable && options.checkTransport
     ? {
         name: "transport_send_link",
         status: "skipped",
-        code: "IDENTITY_CONFIGURATION_UNAVAILABLE",
+        code: "RUNTIME_CONFIGURATION_UNAVAILABLE",
       }
     : await inspectTransport(
         configResult.config,
@@ -211,6 +235,43 @@ function inspectIdentity(config: BridgeConfig): DoctorCheck {
   return { name: "identity_configuration", status: "pass" };
 }
 
+function inspectMessageAuthentication(
+  config: BridgeConfig,
+  probe: DoctorMessageAuthenticationProbe,
+): DoctorCheck {
+  try {
+    probe(config);
+    return { name: "message_authentication", status: "pass" };
+  } catch {
+    return {
+      name: "message_authentication",
+      status: "fail",
+      code: "MESSAGE_AUTHENTICATION_INVALID",
+    };
+  }
+}
+
+function probeMessageAuthentication(
+  _config: BridgeConfig,
+  configPath: string | undefined,
+): void {
+  const bridgeRuntimeFile = defaultBridgeRuntimeFile();
+  const result = spawnSync(process.execPath, [
+    ...process.execArgv,
+    bridgeRuntimeFile,
+    "--validate-message-authentication",
+    ...(configPath === undefined ? [] : ["--config", configPath]),
+  ], {
+    encoding: "utf8",
+    env: process.env,
+    timeout: MESSAGE_AUTHENTICATION_TIMEOUT_MS,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("Bridge message authentication validation failed");
+  }
+}
+
 function inspectRuntime(
   nodeVersion: string,
   runtimeFiles: readonly string[] | undefined,
@@ -234,6 +295,13 @@ function defaultRuntimeFiles(): readonly string[] {
     path.join(runtimeRoot, "mcp", `index${extension}`),
     path.join(runtimeRoot, "dispatcher", `index${extension}`),
   ];
+}
+
+function defaultBridgeRuntimeFile(): string {
+  const modulePath = fileURLToPath(import.meta.url);
+  const extension = path.extname(modulePath);
+  const runtimeRoot = path.resolve(path.dirname(modulePath), "..");
+  return path.join(runtimeRoot, "bridge", `index${extension}`);
 }
 
 function inspectConfiguration(load: () => BridgeConfig): {
