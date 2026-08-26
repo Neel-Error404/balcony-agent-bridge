@@ -39,6 +39,9 @@ describe("public alpha documentation contract", () => {
     expect(readme).toContain("production service installation remains a reviewed source");
     expect(readme).toContain("balcony-agent-bridge demo");
     expect(readme).toContain("replace that command with\n`node $bridgeCli`");
+    expect(readme).not.toContain(
+      "The remaining commands assume the source-checkout `$bridgeCli`",
+    );
     expect(readme).toContain(
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );

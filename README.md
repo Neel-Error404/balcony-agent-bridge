@@ -76,8 +76,7 @@ try {
 }
 ```
 
-The remaining commands assume the source-checkout `$bridgeCli` defined in the
-first snippet. The core Node runtime may work on other operating systems, but
+The core Node runtime may work on other operating systems, but
 this release candidate has only been verified on Windows; translate paths and
 shell syntax before evaluating it elsewhere.
 
