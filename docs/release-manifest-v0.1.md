@@ -3,7 +3,9 @@
 This manifest defines the release gate for `balcony-agent-bridge` version
 `0.1.0`. The owner approved public npm publication, a `v0.1.0` Git tag and
 GitHub Release, retained public history, private vulnerability reporting, and a
-separately verified live multi-node rollout on 2026-08-26.
+separately gated live multi-node rollout on 2026-08-26. Publication and rollout
+are complete only when their remote evidence is recorded; approval alone is
+not completion.
 
 ## Included Source Surfaces
 

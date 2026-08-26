@@ -31,8 +31,10 @@ the smaller static design.
   work; schema v7 marks all remaining legacy inbox rows as unauthenticated so
   they cannot authorize new continuation work.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
-  it is not evidence from a separate clean OS/VM. Version `0.1.0` is a public
-  alpha package and GitHub release, not a production-service support promise.
+  it is not evidence from a separate clean OS/VM. Version `0.1.0` is the
+  approved public alpha package and GitHub release target, not a
+  production-service support promise; registry and release availability must
+  be verified independently.
 - GitHub private vulnerability reporting is enabled. Follow `SECURITY.md` and
   never put sensitive vulnerability details in a public issue.
 - The owner accepted the existing public Git history for `v0.1.0` after a

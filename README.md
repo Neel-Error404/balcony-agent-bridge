@@ -10,11 +10,11 @@ authorized nodes, direct one-to-one routing, one production transport, and an
 optional read-only Codex dispatcher. It is not a hosted discovery service, a
 file-sync product, or a writable remote-execution platform.
 
-This repository and the `balcony-agent-bridge` package are a public `0.1.0`
-alpha under Apache-2.0. Anyone may clone, build, inspect, modify, and use it
-under that license. The package is published publicly on npm for local CLI and
-MCP evaluation; production service installation remains a reviewed source
-operation because the npm artifact intentionally excludes infrastructure and
+This repository is public under Apache-2.0, and version `0.1.0` is approved for
+public npm distribution as an alpha. Anyone may clone, build, inspect, modify,
+and use it under that license. The npm artifact is for local CLI and MCP
+evaluation; production service installation remains a reviewed source
+operation because the package intentionally excludes infrastructure and
 Windows service-management scripts.
 
 ## Install
@@ -28,9 +28,11 @@ Requirements:
 - Azure access only when deliberately deploying or checking the production
   transport.
 
-Install the public CLI and MCP package:
+After the registry reports version `0.1.0`, install the public CLI and MCP
+package:
 
 ```powershell
+npm view balcony-agent-bridge@0.1.0 version
 npm install --global balcony-agent-bridge@0.1.0
 balcony-agent-bridge --help
 ```
@@ -346,9 +348,10 @@ level. `docs/release-manifest-v0.1.md` separates locally verifiable checks from
 owner-gated Git history, publication, Azure, service, and live multi-node
 checks.
 
-The source repository and `0.1.0` npm package are public. The commands above do
-not deploy Azure resources, install a service, change RBAC, or alter a live
-bridge. See `SECURITY.md` before reporting a vulnerability and
-`docs/ROADMAP.md` for the implementation journey and current release gates.
+The source repository is public and version `0.1.0` is the approved npm and
+GitHub release target. Confirm external package availability with `npm view`.
+The commands above do not deploy Azure resources, install a service, change
+RBAC, or alter a live bridge. See `SECURITY.md` before reporting a vulnerability
+and `docs/ROADMAP.md` for the implementation journey and current release gates.
 
 The local verification workflow does not publish anything.
