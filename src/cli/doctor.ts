@@ -343,7 +343,11 @@ function inspectDatabase(databasePath: string): DoctorCheck {
       REQUIRED_INDEXES.every((name) => indexes.has(name)) &&
       REQUIRED_TABLES.every((name) =>
         hasRequiredColumns(database!, name, REQUIRED_COLUMNS[name]),
-      );
+      ) &&
+      hasExactUniqueIndex(database, "outbox", [
+        "target_system",
+        "idempotency_key",
+      ]);
     const migration = database
       .prepare(
         "SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations WHERE version <= ?",
@@ -381,6 +385,34 @@ function hasRequiredColumns(
     .all() as Array<{ name: string }>;
   const columns = new Set(rows.map((row) => row.name));
   return requiredColumns.every((column) => columns.has(column));
+}
+
+function hasExactUniqueIndex(
+  database: Database.Database,
+  table: string,
+  requiredColumns: readonly string[],
+): boolean {
+  const indexes = database
+    .prepare(
+      'SELECT name, "unique" AS is_unique, partial FROM pragma_index_list(?)',
+    )
+    .all(table) as Array<{
+      name: string;
+      is_unique: number;
+      partial: number;
+    }>;
+  return indexes.some((index) => {
+    if (index.is_unique !== 1 || index.partial !== 0) {
+      return false;
+    }
+    const columns = database
+      .prepare("SELECT name FROM pragma_index_info(?) ORDER BY seqno")
+      .all(index.name) as Array<{ name: string | null }>;
+    return columns.length === requiredColumns.length &&
+      columns.every((column, position) =>
+        column.name === requiredColumns[position],
+      );
+  });
 }
 
 function sqliteObjects(database: Database.Database, type: "table" | "index"): Set<string> {

@@ -20,7 +20,9 @@ fallback, the certificate is stored outside the repository, and its private
 key ACL is restricted to administrators and the Windows service account.
 
 Run `Install-BridgeService.ps1 -WhatIf` before installation. Supply the local
-`-SystemId` and the bounded remote `-AuthorizedNodeIds` list explicitly. The
+`-SystemId`, the matching topology `-SubscriptionName`, and the bounded remote
+`-AuthorizedNodeIds` list explicitly. `-SubscriptionName` defaults to the
+lowercase system ID when the topology uses that convention. The
 message-authentication membership and signing-key paths are mandatory. The
 installer refuses reparse points, broad private-key read ACLs, or runtime
 inputs writable outside LocalSystem, Administrators, and TrustedInstaller.
@@ -40,6 +42,7 @@ $env:BALCONY_SYSTEM_ID = "build-node"
 $identityRoot = "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node-identity"
 $install = @{
     SystemId = "build-node"
+    SubscriptionName = "bridge-build"
     AuthorizedNodeIds = @("laptop-a", "laptop-b")
     ServiceBusNamespace = "replace-with-approved.servicebus.windows.net"
     ManagedIdentityClientId = "11111111-1111-4111-8111-111111111111"

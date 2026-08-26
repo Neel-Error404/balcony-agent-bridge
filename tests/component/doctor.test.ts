@@ -88,6 +88,22 @@ describe("bridge doctor", () => {
     });
   });
 
+  it("rejects a current schema without the outbox idempotency constraint", async () => {
+    const databasePath = createDatabaseWithoutOutboxUniqueness();
+    const report = await runDoctor({
+      loadConfig: () => config(databasePath),
+      messageAuthenticationProbe: validMessageAuthenticationProbe,
+      nodeVersion: "v22.0.0",
+      runtimeFiles: [databasePath],
+    });
+
+    expect(report.checks).toContainEqual({
+      name: "database",
+      status: "fail",
+      code: "DATABASE_SCHEMA_UNSUPPORTED",
+    });
+  });
+
   it("rejects a database created by a newer runtime", async () => {
     const databasePath = createHealthyDatabase();
     const database = new Database(databasePath);
@@ -327,6 +343,42 @@ function createIncompleteDatabase(): string {
       CREATE INDEX idx_outbox_dispatch ON outbox (message_id);
       CREATE INDEX idx_inbox_claim ON inbox (message_id);
       CREATE INDEX idx_inbox_causation ON inbox (message_id);
+    `);
+  } finally {
+    database.close();
+  }
+  return databasePath;
+}
+
+function createDatabaseWithoutOutboxUniqueness(): string {
+  const databasePath = createHealthyDatabase();
+  const database = new Database(databasePath);
+  try {
+    database.exec(`
+      DROP INDEX idx_outbox_dispatch;
+      ALTER TABLE outbox RENAME TO outbox_with_uniqueness;
+      CREATE TABLE outbox (
+        message_id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL,
+        target_system TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        stream_id TEXT NOT NULL,
+        payload_sha256 TEXT NOT NULL,
+        envelope_json TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at_utc TEXT NOT NULL,
+        lease_owner TEXT,
+        lease_until_utc TEXT,
+        created_at_utc TEXT NOT NULL,
+        expires_at_utc TEXT,
+        sent_at_utc TEXT,
+        last_error_code TEXT,
+        last_error TEXT
+      );
+      DROP TABLE outbox_with_uniqueness;
+      CREATE INDEX idx_outbox_dispatch
+        ON outbox (state, next_attempt_at_utc, created_at_utc);
     `);
   } finally {
     database.close();

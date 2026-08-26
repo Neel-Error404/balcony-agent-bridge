@@ -153,7 +153,9 @@ The installer later verifies those ACLs and fails closed on broader access.
 
 Source deployments can use `scripts/Install-BridgeService.ps1` after reviewing
 its `-WhatIf` output. Service installation is deliberately not an npm package
-side effect. On Windows, install but do not start the service, then create the
+side effect. Pass the node's provisioned topology subscription as
+`-SubscriptionName`; omitting it keeps the lowercase node-ID default. On
+Windows, install but do not start the service, then create the
 production MCP profile with its database set to
 `%ProgramData%\Balcony\AgentBridge\data\bridge.sqlite3`; the installer grants
 the installing user access to that shared data directory. Register the printed

@@ -83,6 +83,10 @@ effective `$Default` rule with an exact `bridgeTarget` correlation filter,
 grant topic-level send access, and grant receive access only on that node's
 subscription.
 
+When installing a Windows node, pass its inventory `subscriptionName` to
+`Install-BridgeService.ps1 -SubscriptionName`. Omit the parameter only when the
+subscription uses the lowercase node ID default.
+
 For an existing two-node topology, `infra/routing-rules.bicep` also replaces
 the legacy named `bridge-target` filter with an always-false rule. This prevents
 an incremental migration from leaving the old route active; review that

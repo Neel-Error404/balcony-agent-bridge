@@ -81,6 +81,18 @@ describe("Windows service installation contract", () => {
     expect(serviceTemplate).toContain("BALCONY_AUTHORIZED_NODE_IDS");
   });
 
+  it("renders the topology subscription while preserving the node-based default", () => {
+    expect(installer).toContain(
+      '[string] $SubscriptionName = $SystemId.ToLowerInvariant()',
+    );
+    expect(installer).toContain(
+      '"__SUBSCRIPTION_NAME__" = $SubscriptionName',
+    );
+    expect(installer).not.toContain(
+      "$subscriptionName = $SystemId.ToLowerInvariant()\n$authEnvironment",
+    );
+  });
+
   it("requires and projects bridge-only Ed25519 authentication paths without key content handling", () => {
     expect(installer).toContain("[string] $MessageAuthenticationMembershipPath");
     expect(installer).toContain("[string] $MessageAuthenticationSigningKeyPath");

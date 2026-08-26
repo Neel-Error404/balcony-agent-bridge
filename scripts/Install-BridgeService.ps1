@@ -15,6 +15,9 @@ param(
     [ValidatePattern("^[a-z0-9-]+\.servicebus\.windows\.net$")]
     [string] $ServiceBusNamespace,
 
+    [ValidatePattern("^[a-z][a-z0-9-]{0,49}$")]
+    [string] $SubscriptionName = $SystemId.ToLowerInvariant(),
+
     [Parameter(Mandatory, ParameterSetName = "ManagedIdentity")]
     [guid] $ManagedIdentityClientId,
 
@@ -263,7 +266,6 @@ $logDirectory = Join-Path $InstallRoot "logs"
 $databasePath = Join-Path $dataDirectory "bridge.sqlite3"
 $serviceExecutable = Join-Path $serviceDirectory "BalconyAgentBridge.exe"
 $serviceConfiguration = Join-Path $serviceDirectory "BalconyAgentBridge.xml"
-$subscriptionName = $SystemId.ToLowerInvariant()
 $authEnvironment = if (
     $PSCmdlet.ParameterSetName -eq "ManagedIdentity"
 ) {
@@ -346,7 +348,7 @@ if ($PSCmdlet.ShouldProcess(
         "__DATABASE_PATH__" = $databasePath
         "__SERVICEBUS_NAMESPACE__" = $ServiceBusNamespace
         "__TOPIC_NAME__" = $TopicName
-        "__SUBSCRIPTION_NAME__" = $subscriptionName
+        "__SUBSCRIPTION_NAME__" = $SubscriptionName
         "__MESSAGE_AUTH_MEMBERSHIP_PATH__" = $MessageAuthenticationMembershipPath
         "__MESSAGE_AUTH_SIGNING_KEY_PATH__" = $MessageAuthenticationSigningKeyPath
         "__LOG_PATH__" = $logDirectory

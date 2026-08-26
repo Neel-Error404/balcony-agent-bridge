@@ -159,3 +159,42 @@ Live GitHub state at this checkpoint: the PR is open, non-draft,
 threads are resolved and the four follow-up threads remain unresolved because
 the corrected tree is not yet committed or pushed. No new authorization to
 stage, commit, push, answer or resolve threads, or merge has been inferred.
+
+## Second Follow-Up Review Remediation — 2026-08-26
+
+After commit `6994b98f53bae7fa90ba09cedb5d3f09428204d1` was reviewed, two new
+inline findings were added to PR #2. The current local working tree addresses
+both findings without changing the architecture:
+
+- `doctor` now verifies that `outbox` has a non-partial unique index whose
+  columns are exactly `target_system, idempotency_key` in that order; and
+- the Windows installer accepts the node inventory's `subscriptionName`,
+  preserves the lowercase node-ID default, and renders the selected value into
+  the runtime environment without overwriting an explicit value.
+
+The updated ordered verification passed with 313 tests and one expected
+platform skip: foundation 101 passed, component 98 passed, integration 30
+passed, workflow 4 passed, recovery 22 passed, and security 58 passed.
+Type-check, build, MCP smoke, reachable-history secret scan, production
+dependency audit, isolated clean-cache consumer verification, PowerShell
+parsing, all four Bicep builds, and diff hygiene also passed. The secret scan
+covered 182 files and reported zero findings. The package evidence is:
+
+```json
+{
+  "package_filename": "balcony-agent-bridge-0.1.0.tgz",
+  "package_shasum": "802b1f2a9d5ebdd447678b9aad5687a7d5972283",
+  "package_integrity": "sha512-33ms5fs8wALV7ysxuclRv9LbY6ymjKROIQxhpiedkRHv3rXEyRXUTn7F02juCV8Go3Z6DiebGlDAr//gZ7z7dQ==",
+  "package_file_count": 102,
+  "package_size_bytes": 123815,
+  "unpacked_size_bytes": 629188,
+  "install_smoke": "isolated-cache-network",
+  "consumer_environment": "disposable-empty-npm-project",
+  "dependency_tree": "valid",
+  "package_command": "npm-exec-offline"
+}
+```
+
+The two new GitHub threads remain unresolved because this corrected tree is
+not yet committed or pushed. Commit, push, thread replies or resolution, and
+merge remain separate owner-gated actions.

@@ -22,7 +22,7 @@ private key.
 | `authorizedNodeIds` | yes | One to 32 unique remote node IDs. The local ID is forbidden. |
 | `databasePath` | yes | Absolute path to this node's SQLite database. |
 | `topicName` | yes | Service Bus topic; defaults to `agent-messages`. |
-| `subscriptionName` | yes | This node's subscription; defaults to the lowercase node ID. |
+| `subscriptionName` | yes | This node's subscription; defaults to the lowercase node ID. Pass the same value as `-SubscriptionName` when installing the Windows service. |
 | `serviceBusNamespace` | no | Fully qualified `*.servicebus.windows.net` hostname. Omit for local-only setup. |
 | `azureAuthMode` | with Azure | `managed_identity` or `client_certificate`; defaults to managed identity. |
 | `managedIdentityClientId` | user-assigned identity only | Approved client UUID. |
