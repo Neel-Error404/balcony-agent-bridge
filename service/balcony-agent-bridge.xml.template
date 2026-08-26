@@ -6,10 +6,14 @@
   <arguments>__BRIDGE_ENTRYPOINT__</arguments>
   <workingdirectory>__REPOSITORY_ROOT__</workingdirectory>
   <env name="BALCONY_SYSTEM_ID" value="__SYSTEM_ID__" />
+  <env name="BALCONY_AUTHORIZED_NODE_IDS" value="__AUTHORIZED_NODE_IDS__" />
   <env name="BALCONY_BRIDGE_DB_PATH" value="__DATABASE_PATH__" />
   <env name="BALCONY_SERVICEBUS_NAMESPACE" value="__SERVICEBUS_NAMESPACE__" />
   <env name="BALCONY_SERVICEBUS_TOPIC" value="__TOPIC_NAME__" />
   <env name="BALCONY_SERVICEBUS_SUBSCRIPTION" value="__SUBSCRIPTION_NAME__" />
+  <env name="BALCONY_MESSAGE_AUTH_MODE" value="ed25519" />
+  <env name="BALCONY_MESSAGE_AUTH_MEMBERSHIP_PATH" value="__MESSAGE_AUTH_MEMBERSHIP_PATH__" />
+  <env name="BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH" value="__MESSAGE_AUTH_SIGNING_KEY_PATH__" />
 __AUTH_ENVIRONMENT__
   <logpath>__LOG_PATH__</logpath>
   <log mode="roll-by-size-time">

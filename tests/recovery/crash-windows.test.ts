@@ -74,8 +74,8 @@ describe("crash recovery windows", () => {
 function envelope(idempotencyKey: string) {
   return createEnvelope({
     idempotencyKey,
-    originSystem: "SYS-A",
-    targetSystem: "SYS-B",
+    originSystem: "review-node-01",
+    targetSystem: "review-node-03",
     kind: "task_request",
     streamId: "recovery-tests",
     payload: {

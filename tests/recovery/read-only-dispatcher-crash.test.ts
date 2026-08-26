@@ -345,7 +345,7 @@ function incomingEnvelope() {
 function bridgeConfig(databasePath: string): BridgeConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath,
     topicName: "agent-messages",
     subscriptionName: "sys-b",
@@ -359,7 +359,7 @@ function dispatcherConfig(
 ): ReadOnlyDispatcherConfig {
   return {
     systemId: "SYS-B",
-    peerSystemId: "SYS-A",
+    authorizedNodeIds: ["SYS-A"],
     databasePath,
     projectsPath,
     codexExecutable: "unused-in-recovery-test",

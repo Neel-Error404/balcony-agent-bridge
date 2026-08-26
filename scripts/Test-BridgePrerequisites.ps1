@@ -3,8 +3,29 @@ param()
 
 $ErrorActionPreference = "Stop"
 
-if ($env:BALCONY_SYSTEM_ID -notin @("SYS-A", "SYS-B")) {
-    throw "BALCONY_SYSTEM_ID must be set in this process to SYS-A or SYS-B."
+$nodeIdPattern = "^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$"
+if ($env:BALCONY_SYSTEM_ID -notmatch $nodeIdPattern) {
+    throw "BALCONY_SYSTEM_ID must be a valid node ID."
+}
+
+$authorizedNodeIds = @(
+    $env:BALCONY_AUTHORIZED_NODE_IDS -split "," |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ }
+)
+if ($authorizedNodeIds.Count -lt 1 -or $authorizedNodeIds.Count -gt 32) {
+    throw "BALCONY_AUTHORIZED_NODE_IDS must contain between 1 and 32 node IDs."
+}
+foreach ($nodeId in $authorizedNodeIds) {
+    if ($nodeId -notmatch $nodeIdPattern) {
+        throw "BALCONY_AUTHORIZED_NODE_IDS contains an invalid node ID: $nodeId"
+    }
+}
+if (($authorizedNodeIds | Select-Object -Unique).Count -ne $authorizedNodeIds.Count) {
+    throw "BALCONY_AUTHORIZED_NODE_IDS must not contain duplicates."
+}
+if ($authorizedNodeIds -contains $env:BALCONY_SYSTEM_ID) {
+    throw "BALCONY_AUTHORIZED_NODE_IDS must contain only remote node IDs."
 }
 
 $requiredCommands = @("node", "npm", "az")
@@ -32,6 +53,7 @@ catch {
 
 [pscustomobject]@{
     SystemId = $env:BALCONY_SYSTEM_ID
+    AuthorizedNodeIds = $authorizedNodeIds
     Node = node --version
     Npm = npm --version
     AzureCloud = $account.cloud

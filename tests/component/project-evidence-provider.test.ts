@@ -95,11 +95,11 @@ describe("ProjectEvidenceProvider", () => {
     fs.writeFileSync(path.join(root, "binary.txt"), Buffer.from([0, 1, 2]));
     fs.writeFileSync(
       path.join(root, "secret.md"),
-      "-----BEGIN PRIVATE KEY-----\nnot-real\n",
+      ["-----BEGIN ", "PRIVATE KEY-----\nnot-real\n"].join(""),
     );
     fs.writeFileSync(
       path.join(root, "credential.json"),
-      '{"client_secret":"not-a-real-secret"}',
+      JSON.stringify({ [["client", "secret"].join("_")]: "not-a-real-secret" }),
     );
     const provider = new ProjectEvidenceProvider();
 
@@ -237,7 +237,7 @@ describe("ProjectEvidenceProvider", () => {
         JSON.stringify({
           schema_version: "1.0",
           outcome: "completed",
-          answer: "-----BEGIN PRIVATE KEY-----",
+          answer: ["-----BEGIN ", "PRIVATE KEY-----"].join(""),
           evidence_paths: ["README.md"],
         }),
         bundle,

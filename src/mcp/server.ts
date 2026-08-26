@@ -7,6 +7,7 @@ import {
   MESSAGE_KINDS,
   MessageKindSchema,
   MessagePayloadSchema,
+  SystemIdSchema,
 } from "../contracts/envelope.js";
 import { BridgeError } from "../errors.js";
 import {
@@ -29,9 +30,10 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
     {
       title: "Send Agent Bridge Message",
       description:
-        "Durably enqueue a secret-safe message for the configured peer system. Success means the local outbox accepted it, not that the peer has processed it.",
+        "Durably enqueue a secret-safe message for an explicitly authorized target node. Success means the local outbox accepted it, not that the target has processed it.",
       inputSchema: {
         idempotency_key: z.string().trim().min(1).max(128),
+        target_node_id: SystemIdSchema,
         kind: MessageKindSchema,
         stream_id: z.string().trim().min(1).max(128),
         payload: MessagePayloadSchema,
@@ -52,6 +54,7 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
       toolResult(() =>
         service.send({
           idempotencyKey: input.idempotency_key,
+          targetNodeId: input.target_node_id,
           kind: input.kind,
           streamId: input.stream_id,
           payload: input.payload,
@@ -79,9 +82,10 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
     {
       title: "Ask Peer Project Agent",
       description:
-        "Create a durable, read-only project question for the configured peer system. Returns a task ID immediately; use agent_bridge_get_result to observe delivery and retrieve the eventual answer.",
+        "Create a durable, read-only project question for an explicitly authorized target node. Returns a task ID immediately; use agent_bridge_get_result to observe delivery and retrieve the eventual answer.",
       inputSchema: {
         idempotency_key: z.string().trim().min(1).max(128),
+        target_node_id: SystemIdSchema,
         project_id: z.string().trim().min(1).max(120),
         subject: z.string().trim().min(1).max(200),
         request: z.string().trim().min(1).max(12_000),
@@ -102,6 +106,7 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
       toolResult(() =>
         service.askAgent({
           idempotencyKey: input.idempotency_key,
+          targetNodeId: input.target_node_id,
           projectId: input.project_id,
           subject: input.subject,
           request: input.request,

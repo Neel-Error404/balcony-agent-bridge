@@ -2,26 +2,45 @@
   "name": "balcony-agent-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Durable MCP bridge for secret-safe agent communication between SYS-A and SYS-B",
+  "license": "Apache-2.0",
+  "description": "Durable MCP bridge for secret-safe coordination between coding agents",
   "type": "module",
+  "files": [
+    "dist",
+    "LICENSE",
+    "config/codex-mcp.example.toml",
+    "config/dispatcher-projects.example.json",
+    "SECURITY.md"
+  ],
+  "bin": {
+    "balcony-agent-bridge": "./dist/cli/index.js",
+    "balcony-agent-bridge-mcp": "./dist/mcp/index.js"
+  },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:foundation": "vitest run tests/foundation",
     "test:component": "vitest run tests/component",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run tests/integration --maxWorkers=1",
     "test:workflow": "vitest run tests/workflow",
     "test:recovery": "vitest run tests/recovery",
     "test:security": "vitest run tests/security",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "check:secrets": "node scripts/check-public-safety.mjs --history",
+    "verify:package": "npm run build && node scripts/verify-package.mjs",
+    "smoke:package": "npm run build && node scripts/verify-package.mjs --install",
+    "verify:public-alpha": "npm run build && node scripts/verify-package.mjs --install --clean-cache",
     "start:mcp": "node dist/mcp/index.js",
     "start:bridge": "node dist/bridge/index.js",
     "start:dispatcher": "node dist/dispatcher/index.js",
-    "bridge:status": "node dist/cli/index.js status"
+    "bridge:status": "node dist/cli/index.js status",
+    "demo": "npm run build && node dist/cli/index.js demo"
   },
   "dependencies": {
     "@azure/core-auth": "1.11.0",

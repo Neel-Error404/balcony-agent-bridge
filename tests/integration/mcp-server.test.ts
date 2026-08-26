@@ -17,7 +17,7 @@ describe("MCP server", () => {
     database = new BridgeDatabase(":memory:");
     const config: BridgeConfig = {
       systemId: "SYS-A",
-      peerSystemId: "SYS-B",
+      authorizedNodeIds: ["SYS-B", "node-c"],
       databasePath: ":memory:",
       topicName: "agent-messages",
       subscriptionName: "sys-a",
@@ -65,6 +65,7 @@ describe("MCP server", () => {
   it("creates an idempotent coordination task and returns its linked result", async () => {
     const askArguments = {
       idempotency_key: "mcp-coordinate-1",
+      target_node_id: "SYS-B",
       project_id: "voiceai",
       subject: "Inspect VoiceAI",
       request: "Report the current repository state without modifying it.",
@@ -131,7 +132,7 @@ describe("MCP server", () => {
       },
       now: new Date("2026-08-13T12:00:00.000Z"),
     });
-    database.persistIncoming(result, 1);
+    database.persistIncoming(result, 1, new Date(), true);
 
     const completed = toolOutput(
       await client.callTool({
@@ -190,6 +191,7 @@ describe("MCP server", () => {
       name: "agent_bridge_send",
       arguments: {
         idempotency_key: "mcp-send-1",
+        target_node_id: "node-c",
         kind: "task_request",
         stream_id: "mcp-test",
         payload: {
@@ -371,11 +373,12 @@ describe("MCP server", () => {
       name: "agent_bridge_send",
       arguments: {
         idempotency_key: "unsafe-mcp",
+        target_node_id: "SYS-B",
         kind: "message",
         stream_id: "mcp-test",
         payload: {
           subject: "Unsafe",
-          body: "-----BEGIN PRIVATE KEY-----",
+          body: ["-----BEGIN ", "PRIVATE KEY-----"].join(""),
           evidence: [],
         },
       },

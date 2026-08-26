@@ -36,6 +36,43 @@ describe("BridgeDatabase", () => {
     );
   });
 
+  it("stores durable messages for generic node identifiers", () => {
+    const outgoing = createEnvelope({
+      idempotencyKey: "generic-outgoing",
+      originSystem: "review-node-01",
+      targetSystem: "review-node-03",
+      kind: "message",
+      streamId: "phase-2",
+      payload: {
+        subject: "Generic route",
+        body: "Route to the third node.",
+        evidence: [],
+      },
+    });
+    const incoming = createEnvelope({
+      idempotencyKey: "generic-incoming",
+      originSystem: "review-node-03",
+      targetSystem: "review-node-01",
+      kind: "message",
+      streamId: "phase-2",
+      payload: {
+        subject: "Generic reply",
+        body: "Reply from the third node.",
+        evidence: [],
+      },
+    });
+
+    database.enqueueEnvelope(outgoing);
+    database.persistIncoming(incoming, 1);
+
+    expect(database.getOutboxMessage(outgoing.message_id)?.envelope.target_system).toBe(
+      "review-node-03",
+    );
+    expect(database.getInboxMessage(incoming.message_id)?.envelope.origin_system).toBe(
+      "review-node-03",
+    );
+  });
+
   it("leases, releases, reclaims, and settles outbox messages", () => {
     const message = envelope("lease-key", "Lease me");
     database.enqueueEnvelope(message);
@@ -88,6 +125,48 @@ describe("BridgeDatabase", () => {
     };
     expect(database.persistIncoming(collision, 3).status).toBe("collision");
     expect(database.getStatus().inbox.quarantined).toBe(1);
+  });
+
+  it("rejects a cross-origin collision without quarantining the authenticated original", () => {
+    const original = envelope("cross-origin-collision", "Expected");
+    expect(database.persistIncoming(original, 1, new Date(), true).status).toBe(
+      "inserted",
+    );
+
+    const collision = {
+      ...original,
+      origin_system: "node-c",
+    };
+    expect(database.persistIncoming(collision, 2, new Date(), true).status).toBe(
+      "collision",
+    );
+    expect(database.getStatus().inbox.available).toBe(1);
+    expect(database.getStatus().inbox.quarantined).toBe(0);
+
+    const stored = database.getInboxMessage(original.message_id);
+    expect(stored?.state).toBe("available");
+    expect(stored?.envelope).toEqual(original);
+    expect(database.claimInbox("consumer", 1, 30)).toHaveLength(1);
+  });
+
+  it("quarantines message ID reuse with changed signed metadata", () => {
+    const original = envelope("metadata-collision", "Expected");
+    expect(database.persistIncoming(original, 1).status).toBe("inserted");
+
+    const collision = {
+      ...original,
+      idempotency_key: "changed-idempotency-key",
+      conversation_id: "d11ba69d-73cf-4c14-b725-1019618fb554",
+    };
+    expect(database.persistIncoming(collision, 2).status).toBe("collision");
+    expect(database.getStatus().inbox).toMatchObject({
+      available: 0,
+      quarantined: 1,
+    });
+    expect(database.getInboxMessage(original.message_id)?.envelope).toEqual(
+      original,
+    );
+    expect(database.claimInbox("consumer", 1, 30)).toHaveLength(0);
   });
 
   it("claims, renews, retries, and completes inbox messages atomically", () => {

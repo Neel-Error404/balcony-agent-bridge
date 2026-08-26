@@ -2,7 +2,7 @@
 param(
     [string]$ServiceName = "BalconyAgentBridge",
 
-    [ValidateSet("SYS-A", "SYS-B")]
+    [ValidatePattern("^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$")]
     [string]$SystemId = $env:BALCONY_SYSTEM_ID,
 
     [string]$ProgramDataRoot = $(

@@ -8,10 +8,10 @@ import type { BridgeConfig } from "../../src/config.js";
 import { createServiceBusCredential } from "../../src/transport/service-bus-transport.js";
 
 describe("Azure credential selection", () => {
-  it("requires and selects the configured user-assigned identity", () => {
-    expect(() =>
+  it("selects system-assigned or configured user-assigned identity", () => {
+    expect(
       createServiceBusCredential(config("managed_identity")),
-    ).toThrow(/BALCONY_MANAGED_IDENTITY_CLIENT_ID/);
+    ).toBeInstanceOf(ManagedIdentityCredential);
 
     const credential = createServiceBusCredential({
       ...config("managed_identity"),
@@ -43,7 +43,7 @@ function config(
 ): BridgeConfig {
   return {
     systemId: "SYS-A",
-    peerSystemId: "SYS-B",
+    authorizedNodeIds: ["SYS-B"],
     databasePath: ":memory:",
     serviceBusNamespace:
       "approved-namespace.servicebus.windows.net",

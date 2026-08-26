@@ -12,6 +12,9 @@ coverage/
 logs/
 tmp/
 *.local.json
+node-identity.pkcs8.pem
+node-enrollment.json
+membership.json
 infra/*.parameters.json
 infra/*.bicepparam
 !infra/example.parameters.json

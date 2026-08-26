@@ -121,7 +121,7 @@ describe("PinnedGitEvidenceProvider", () => {
 
       fs.writeFileSync(
         path.join(repository, "credential.json"),
-        '{"client_secret":"not-a-real-secret"}\n',
+        `${JSON.stringify({ ["client_" + "secret"]: "not-a-real-secret" })}\n`,
       );
       git(repository, ["add", "credential.json"]);
       git(repository, ["commit", "-m", "add synthetic credential"]);

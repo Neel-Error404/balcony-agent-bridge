@@ -19,17 +19,33 @@ describe("payload secret policy", () => {
     expect(() =>
       assertSecretSafe({
         result: {
-          client_secret: "not-a-real-secret",
+          [["client", "secret"].join("_")]: "not-a-real-secret",
         },
       }),
     ).toThrow(SecretPolicyError);
   });
 
-  it("rejects private key material", () => {
-    expect(() =>
-      assertSecretSafe({
-        body: "-----BEGIN PRIVATE KEY-----",
-      }),
-    ).toThrow(/private key block/);
+  it.each([
+    ["PKCS8", ["-----BEGIN ", "PRIVATE KEY-----"].join("")],
+    ["encrypted", ["-----BEGIN ", "ENCRYPTED PRIVATE KEY-----"].join("")],
+    ["DSA", ["-----BEGIN ", "DSA PRIVATE KEY-----"].join("")],
+    ["PGP", ["-----BEGIN ", "PGP PRIVATE KEY BLOCK-----"].join("")],
+  ])("rejects %s private key material", (_label, value) => {
+    expect(() => assertSecretSafe({ body: value })).toThrow(/private key block/);
+  });
+
+  it.each([
+    ["AWS", `AKIA${"A".repeat(16)}`],
+    ["OpenAI", `sk-${"A".repeat(24)}`],
+    ["Slack", `xoxb-${"A".repeat(24)}`],
+    ["npm", `npm_${"A".repeat(36)}`],
+    ["client secret", `${["client", "secret"].join("_")} = ${"A".repeat(24)}`],
+    ["SAS", `https://example.invalid/path?sig=${"A".repeat(24)}`],
+    [
+      "credentialed URL",
+      ["https", "://", "user", ":", "A".repeat(24), "@", "example.invalid"].join(""),
+    ],
+  ])("rejects %s credential material in string values", (_label, value) => {
+    expect(() => assertSecretSafe({ body: value })).toThrow(SecretPolicyError);
   });
 });

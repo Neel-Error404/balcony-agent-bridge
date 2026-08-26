@@ -1,5 +1,16 @@
 targetScope = 'resourceGroup'
 
+@sealed()
+type nodeDefinition = {
+  @minLength(1)
+  @maxLength(50)
+  nodeId: string
+  @minLength(1)
+  @maxLength(50)
+  subscriptionName: string
+  principalId: string
+}
+
 @description('Globally unique Service Bus namespace name.')
 @minLength(6)
 @maxLength(50)
@@ -11,11 +22,10 @@ param location string = 'centralindia'
 @description('Topic used for directed bridge messages.')
 param topicName string = 'agent-messages'
 
-param sysASubscriptionName string = 'sys-a'
-param sysBSubscriptionName string = 'sys-b'
-
-param sysAIdentityName string = 'id-balcony-agent-bridge-sys-a'
-param sysBIdentityName string = 'id-balcony-agent-bridge-sys-b'
+@description('Approved static node inventory. Each entry contains nodeId, subscriptionName, and the object ID of its existing Entra service principal.')
+@minLength(1)
+@maxLength(32)
+param nodes nodeDefinition[]
 
 @description('Optional existing Log Analytics workspace resource ID.')
 param diagnosticWorkspaceResourceId string = ''
@@ -48,18 +58,6 @@ var receiverRoleDefinitionResourceId = subscriptionResourceId(
   '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'
 )
 
-resource sysAIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
-  name: sysAIdentityName
-  location: location
-  tags: tags
-}
-
-resource sysBIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
-  name: sysBIdentityName
-  location: location
-  tags: tags
-}
-
 resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2026-01-01' = {
   name: namespaceName
   location: location
@@ -91,9 +89,9 @@ resource topic 'Microsoft.ServiceBus/namespaces/topics@2026-01-01' = {
   }
 }
 
-resource sysASubscription 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2026-01-01' = {
+resource subscriptions 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2026-01-01' = [for (node, index) in nodes: {
   parent: topic
-  name: sysASubscriptionName
+  name: node.subscriptionName
   properties: {
     deadLetteringOnFilterEvaluationExceptions: true
     deadLetteringOnMessageExpiration: true
@@ -104,98 +102,43 @@ resource sysASubscription 'Microsoft.ServiceBus/namespaces/topics/subscriptions@
     requiresSession: true
     status: 'Active'
   }
-}
+}]
 
-resource sysBSubscription 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2026-01-01' = {
-  parent: topic
-  name: sysBSubscriptionName
-  properties: {
-    deadLetteringOnFilterEvaluationExceptions: true
-    deadLetteringOnMessageExpiration: true
-    defaultMessageTimeToLive: maximumMessageTimeToLive
-    enableBatchedOperations: true
-    lockDuration: lockDuration
-    maxDeliveryCount: maxDeliveryCount
-    requiresSession: true
-    status: 'Active'
-  }
-}
-
-resource sysAFilter 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = {
-  parent: sysASubscription
-  name: 'bridge-target'
+// Replacing the automatically created $Default rule prevents every node from
+// receiving every message. Each subscription accepts only its exact node ID.
+resource targetFilters 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = [for (node, index) in nodes: {
+  parent: subscriptions[index]
+  name: '$Default'
   properties: {
     filterType: 'CorrelationFilter'
     correlationFilter: {
       requiresPreprocessing: false
       properties: {
-        bridgeTarget: 'SYS-A'
+        bridgeTarget: node.nodeId
       }
     }
   }
-}
+}]
 
-resource sysBFilter 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = {
-  parent: sysBSubscription
-  name: 'bridge-target'
-  properties: {
-    filterType: 'CorrelationFilter'
-    correlationFilter: {
-      requiresPreprocessing: false
-      properties: {
-        bridgeTarget: 'SYS-B'
-      }
-    }
-  }
-}
-
-resource sysASenderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(topic.id, sysAIdentity.id, senderRoleDefinitionResourceId)
+resource senderRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (node, index) in nodes: {
+  name: guid(topic.id, node.principalId, senderRoleDefinitionResourceId)
   scope: topic
   properties: {
-    principalId: sysAIdentity.properties.principalId
+    principalId: node.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: senderRoleDefinitionResourceId
   }
-}
+}]
 
-resource sysBSenderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(topic.id, sysBIdentity.id, senderRoleDefinitionResourceId)
-  scope: topic
+resource receiverRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (node, index) in nodes: {
+  name: guid(subscriptions[index].id, node.principalId, receiverRoleDefinitionResourceId)
+  scope: subscriptions[index]
   properties: {
-    principalId: sysBIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: senderRoleDefinitionResourceId
-  }
-}
-
-resource sysAReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(
-    sysASubscription.id,
-    sysAIdentity.id,
-    receiverRoleDefinitionResourceId
-  )
-  scope: sysASubscription
-  properties: {
-    principalId: sysAIdentity.properties.principalId
+    principalId: node.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: receiverRoleDefinitionResourceId
   }
-}
-
-resource sysBReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(
-    sysBSubscription.id,
-    sysBIdentity.id,
-    receiverRoleDefinitionResourceId
-  )
-  scope: sysBSubscription
-  properties: {
-    principalId: sysBIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: receiverRoleDefinitionResourceId
-  }
-}
+}]
 
 resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(diagnosticWorkspaceResourceId)) {
   name: 'balcony-agent-bridge-diagnostics'
@@ -217,11 +160,4 @@ resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' 
 
 output createdNamespaceName string = serviceBusNamespace.name
 output createdTopicName string = topic.name
-output createdSubscriptionNames array = [
-  sysASubscription.name
-  sysBSubscription.name
-]
-output createdIdentityNames array = [
-  sysAIdentity.name
-  sysBIdentity.name
-]
+output createdSubscriptionNames array = [for node in nodes: node.subscriptionName]

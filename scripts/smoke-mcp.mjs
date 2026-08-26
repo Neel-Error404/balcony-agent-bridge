@@ -21,6 +21,7 @@ const transport = new StdioClientTransport({
   env: {
     ...inheritedEnvironment,
     BALCONY_SYSTEM_ID: "SYS-A",
+    BALCONY_AUTHORIZED_NODE_IDS: "SYS-B,node-c",
     BALCONY_BRIDGE_DB_PATH: path.join(
       temporaryDirectory,
       "bridge.sqlite3",

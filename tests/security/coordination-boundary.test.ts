@@ -20,7 +20,7 @@ describe("coordination security boundary", () => {
     database = new BridgeDatabase(":memory:");
     const config: BridgeConfig = {
       systemId: "SYS-A",
-      peerSystemId: "SYS-B",
+      authorizedNodeIds: ["SYS-B", "node-c"],
       databasePath: ":memory:",
       topicName: "agent-messages",
       subscriptionName: "sys-a",
@@ -49,9 +49,10 @@ describe("coordination security boundary", () => {
       name: "agent_bridge_ask_agent",
       arguments: {
         idempotency_key: "unsafe-coordination-request",
+        target_node_id: "SYS-B",
         project_id: "voiceai",
         subject: "Unsafe inspection",
-        request: "Inspect this: -----BEGIN PRIVATE KEY-----",
+        request: ["Inspect this: -----BEGIN ", "PRIVATE KEY-----"].join(""),
       },
     });
 
@@ -74,11 +75,89 @@ describe("coordination security boundary", () => {
     expect(JSON.stringify(response.content)).not.toContain(privateTaskId);
   });
 
+  it("ignores a wrong-node result without hiding the requested node's result", async () => {
+    const ask = (
+      await client.callTool({
+        name: "agent_bridge_ask_agent",
+        arguments: {
+          idempotency_key: "wrong-authorized-result-route",
+          target_node_id: "SYS-B",
+          project_id: "voiceai",
+          subject: "Inspect VoiceAI",
+          request: "Report current state.",
+        },
+      })
+    ).structuredContent as { task_id: string; conversation_id: string };
+    const wrongNodeReply = createEnvelope({
+      idempotencyKey: "wrong-authorized-result",
+      originSystem: "node-c",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: ask.conversation_id,
+      causationId: ask.task_id,
+      payload: {
+        subject: "Unexpected result",
+        body: "This result came from the wrong authorized node.",
+        project: "voiceai",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: ask.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(wrongNodeReply, 1, new Date(), true);
+
+    const waiting = await client.callTool({
+      name: "agent_bridge_get_result",
+      arguments: { task_id: ask.task_id },
+    });
+
+    expect(waiting.isError).not.toBe(true);
+    expect(waiting.structuredContent).toMatchObject({ status: "queued" });
+
+    const expectedReply = createEnvelope({
+      idempotencyKey: "expected-authorized-result",
+      originSystem: "SYS-B",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: ask.conversation_id,
+      causationId: ask.task_id,
+      payload: {
+        subject: "Expected result",
+        body: "This result came from the requested node.",
+        project: "voiceai",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: ask.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(expectedReply, 1, new Date(), true);
+
+    const completed = await client.callTool({
+      name: "agent_bridge_get_result",
+      arguments: { task_id: ask.task_id },
+    });
+
+    expect(completed.isError).not.toBe(true);
+    expect(completed.structuredContent).toMatchObject({
+      status: "completed",
+      result_message_id: expectedReply.message_id,
+    });
+  });
+
   it("rejects a follow-up when the peer changes the thread project", async () => {
     const askResponse = await client.callTool({
       name: "agent_bridge_ask_agent",
       arguments: {
         idempotency_key: "project-boundary-request",
+        target_node_id: "SYS-B",
         project_id: "voiceai",
         subject: "Inspect VoiceAI",
         request: "Report current state.",
@@ -109,7 +188,7 @@ describe("coordination security boundary", () => {
         },
       },
     });
-    database.persistIncoming(mismatchedResult, 1);
+    database.persistIncoming(mismatchedResult, 1, new Date(), true);
 
     const response = await client.callTool({
       name: "agent_bridge_continue_agent",

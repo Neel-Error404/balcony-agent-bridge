@@ -27,7 +27,7 @@ SQLite database, claims only explicitly routed read-only Codex tasks, and never
 connects to Azure. Codex execution does not occur inside the broker receive
 handler, so a long inspection cannot hold an Azure message lock.
 
-The consultation candidate adds a durable autonomous consultation
+The optional consultation mode adds a durable autonomous consultation
 coordinator beside that dispatcher. It parks child information requests in
 version-fenced SQLite runs, resumes one transition at a time, and may create
 one correlated nested peer request within bounded round, depth, timeout,
@@ -61,8 +61,9 @@ The durable transaction is:
 
 1. `agent_bridge_ask_agent` commits a local outbox request and returns its task
    ID.
-2. A `BridgeTransport` implementation moves the unchanged envelope to the peer.
-3. The peer either leaves it for an interactive consumer or an explicitly
+2. A `BridgeTransport` implementation moves the unchanged envelope to the
+   explicitly addressed authorized node.
+3. That node either leaves it for an interactive consumer or an explicitly
    started dispatcher claims it.
 4. The peer publishes one causally linked task result.
 5. `agent_bridge_get_result` finds that result in the local inbox without
@@ -94,7 +95,7 @@ connector should produce bounded evidence for an executor; it should not change
 message delivery semantics or place paths, credentials, or complete memory
 stores in broker messages.
 
-The candidate evidence boundary has two local adapters. The filesystem adapter
+The evidence boundary has two local adapters. The filesystem adapter
 reads explicit allowlisted text paths with containment and reparse controls.
 The Git adapter requires a caller-supplied full revision equal to repository
 `HEAD`, verifies tracked blobs, and reads committed bytes from the Git object
@@ -108,10 +109,13 @@ reader features are disabled. This is an executable tool-surface boundary, not
 a claim that the native process cannot read its own authentication home or
 required operating-system files.
 
-The current orchestration is intentionally small: one configured peer,
-serialized bounded turns inside one project, caller polling, and read-only
-execution. Multi-party discussions, push notifications, streamed partial
-answers, writable tasks, dynamic executor selection, and durable cross-project
+The current orchestration is intentionally small: a bounded static inventory
+of authorized nodes, one explicit target per initial request, serialized
+bounded turns inside one project, caller polling, and read-only execution.
+Replies and continuations derive their destination from the validated causal
+chain rather than a global peer setting. Broadcasts, dynamic discovery,
+multi-party discussions, push notifications, streamed partial answers,
+writable tasks, dynamic executor selection, and durable cross-project
 conversational memory are not implemented.
 
 ## Delivery Semantics
@@ -150,17 +154,45 @@ until `taskkill /T /F` succeeds and the launched process closes.
 
 ## Azure Topology
 
-The approved target topology is one dedicated Service Bus Standard namespace,
-one `agent-messages` topic, and one filtered subscription for each machine.
-Messages use stable `MessageId` values and conversation-scoped `SessionId`
-values. Each subscription has one explicit `bridge-target` correlation rule
-that matches the `bridgeTarget` application property.
+The supported target topology is one dedicated Service Bus Standard namespace,
+one `agent-messages` topic, and one filtered subscription for every node in a
+bounded static inventory. Messages use stable `MessageId` values and
+conversation-scoped `SessionId` values. Each subscription removes the default
+catch-all rule and adds one correlation rule that matches the exact
+`bridgeTarget` application property for that node.
 
-SYS-B is an Azure VM and uses its explicitly selected user-assigned managed
-identity directly; Azure Arc is not required. SYS-A is a physical host and
-uses the separately approved Entra application with a machine-local client
-certificate. The bridge never falls back to Azure CLI credentials, shared SAS
-keys, client secrets, or a chained default credential.
+Every node supplies an existing execution principal. Azure hosts may use an
+explicitly selected user-assigned managed identity; approved non-Azure hosts
+may use an Entra application with a machine-local client certificate. The
+principal receives sender access at the topic and receiver access only at its
+own subscription. The bridge never falls back to Azure CLI credentials,
+shared SAS keys, client secrets, or a chained default credential.
+
+Subscription filters and local authorization lists limit routing, while a
+separate Ed25519 signed-wire layer authenticates `origin_system` and the whole
+unchanged durable envelope. Azure identity remains the broker credential; it
+is not used as the message-signing identity.
+
+The bridge service is the only process that loads the private signing key. It
+signs immediately before Service Bus send. On ingress it verifies the strict
+wire wrapper, network, key status and validity, target, lifetime, signature,
+and broker message/session/correlation/subject/routing metadata before it
+constructs a delivery for the worker. Invalid messages are dead-lettered with
+fixed body-free text and never reach SQLite. The MCP server and dispatcher do
+not load the private signing key.
+
+The membership policy is a local static trust root whose peers must exactly
+match `BALCONY_AUTHORIZED_NODE_IDS`. Multiple active peer keys permit staged
+rotation; revoked and expired keys fail closed. A signed message lives for at
+most seven days and never beyond its envelope expiry. Exact live replay still
+reaches SQLite deduplication by `message_id`; expired replay is rejected before
+persistence.
+
+The fake transport remains raw and unsigned for the Azure-free local demo.
+Production Service Bus has no unsigned compatibility fallback, so upgrading an
+existing network requires a coordinated cutover. The policy format, operator
+procedure, and residual risks are documented in `message-authentication.md`
+and `threat-model.md`.
 
 Operational failures are reduced to stable allowlisted error codes before
 they enter SQLite, MCP status, or stderr. Raw SDK exception text, endpoints,

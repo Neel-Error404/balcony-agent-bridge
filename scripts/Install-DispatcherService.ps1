@@ -1,8 +1,12 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("SYS-A", "SYS-B")]
+    [ValidatePattern("^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$")]
     [string] $SystemId,
+
+    [Parameter(Mandatory)]
+    [ValidateCount(1, 32)]
+    [string[]] $AuthorizedNodeIds,
 
     [Parameter(Mandatory)]
     [ValidatePattern("^[a-f0-9]{40}$")]
@@ -72,6 +76,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$nodeIdPattern = "^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$"
+foreach ($nodeId in $AuthorizedNodeIds) {
+    if ($nodeId -notmatch $nodeIdPattern) {
+        throw "AuthorizedNodeIds contains an invalid node ID: $nodeId"
+    }
+}
+if (($AuthorizedNodeIds | Select-Object -Unique).Count -ne $AuthorizedNodeIds.Count) {
+    throw "AuthorizedNodeIds must not contain duplicates."
+}
+if ($AuthorizedNodeIds -contains $SystemId) {
+    throw "AuthorizedNodeIds must contain only remote node IDs."
+}
+$authorizedNodeIdsValue = $AuthorizedNodeIds -join ","
 $serviceName = "BalconyAgentDispatcher"
 $serviceAccount = "NT AUTHORITY\LocalService"
 $serviceSidAccount = "NT SERVICE\$serviceName"
@@ -305,6 +322,7 @@ if ($PSCmdlet.ShouldProcess(
         "__DISPATCHER_ENTRYPOINT__" = $dispatcherEntrypoint
         "__WORKING_DIRECTORY__" = $workDirectory
         "__SYSTEM_ID__" = $SystemId
+        "__AUTHORIZED_NODE_IDS__" = $authorizedNodeIdsValue
         "__DATABASE_PATH__" = $databasePath
         "__PROJECT_REGISTRY_PATH__" = $ProjectRegistryPath
         "__CODEX_EXECUTABLE__" = $installedCodexExecutable

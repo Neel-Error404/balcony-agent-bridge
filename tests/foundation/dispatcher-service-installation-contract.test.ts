@@ -96,6 +96,11 @@ describe("dispatcher Windows service installation contract", () => {
     expect(installer).toContain('[string] $DispatcherMode = "legacy"');
     expect(installer).toContain("[datetimeoffset] $NotBeforeUtc");
     expect(template).toContain("BALCONY_DISPATCHER_NOT_BEFORE_UTC");
+    expect(installer).toContain("[string[]] $AuthorizedNodeIds");
+    expect(installer).toContain(
+      '"__AUTHORIZED_NODE_IDS__" = $authorizedNodeIdsValue',
+    );
+    expect(template).toContain("BALCONY_AUTHORIZED_NODE_IDS");
   });
 
   it("separates installation from owner-approved automatic activation", () => {

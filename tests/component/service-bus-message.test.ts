@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createEnvelope } from "../../src/contracts/envelope.js";
+import {
+  createEnvelope,
+  type BridgeEnvelope,
+} from "../../src/contracts/envelope.js";
+import {
+  type MessageAuthWire,
+  MessageAuthenticator,
+} from "../../src/security/message-authentication.js";
 import {
   ServiceBusBridgeTransport,
   type ServiceBusClientAdapter,
@@ -28,7 +35,9 @@ describe("Service Bus message mapping", () => {
       expiresAtUtc: "2026-08-20T12:00:00.000Z",
     });
 
-    const message = toServiceBusMessage(envelope);
+    const authenticated = authenticatedEnvelope(envelope);
+    const message = toServiceBusMessage(envelope, authenticated);
+    expect(message.body).toEqual(authenticated);
     expect(message.messageId).toBe(envelope.message_id);
     expect(message.sessionId).toBe(envelope.conversation_id);
     expect(message.correlationId).toBe(envelope.correlation_id);
@@ -46,6 +55,7 @@ describe("Service Bus transport lanes", () => {
     const harness = clientHarness();
     const transport = new ServiceBusBridgeTransport(
       bridgeConfig(),
+      testAuthenticator(),
       undefined,
       harness.factory,
     );
@@ -81,6 +91,7 @@ describe("Service Bus transport lanes", () => {
     const harness = clientHarness();
     const transport = new ServiceBusBridgeTransport(
       bridgeConfig(),
+      testAuthenticator(),
       undefined,
       harness.factory,
     );
@@ -102,11 +113,39 @@ describe("Service Bus transport lanes", () => {
 function bridgeConfig(): BridgeConfig {
   return {
     systemId: "SYS-A",
-    peerSystemId: "SYS-B",
+    authorizedNodeIds: ["SYS-B"],
     databasePath: ":memory:",
     topicName: "agent-messages",
     subscriptionName: "sys-a",
     azureAuthMode: "managed_identity",
+  };
+}
+
+function testAuthenticator(): MessageAuthenticator {
+  return {
+    sign: (envelopeValue: unknown) =>
+      authenticatedEnvelope(envelopeValue as BridgeEnvelope),
+    verify: (value: unknown) => {
+      const wire = value as MessageAuthWire;
+      if (!wire || wire.protocol !== "balcony-agent-bridge-message-auth") {
+        throw new Error("Message authentication rejected.");
+      }
+      return wire.envelope;
+    },
+  } as MessageAuthenticator;
+}
+
+function authenticatedEnvelope(envelope: BridgeEnvelope): MessageAuthWire {
+  return {
+    protocol: "balcony-agent-bridge-message-auth",
+    auth_version: "1.0",
+    network_id: "component-test-network",
+    key_id: `ed25519:${"a".repeat(43)}`,
+    issued_at_utc: envelope.created_at_utc,
+    expires_at_utc:
+      envelope.expires_at_utc ?? "2099-01-01T00:00:00.000Z",
+    envelope,
+    signature: "component-test-signature",
   };
 }
 
