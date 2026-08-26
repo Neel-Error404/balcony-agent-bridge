@@ -1,10 +1,13 @@
 # SYS-A v0.1.0 History And Privacy Review
 
-Date: 2026-08-26  
+Date: 2026-08-26
+
 System: `[SYS-A]` (inferred from the D-drive workspace because the process
-environment did not define `BALCONY_SYSTEM_ID`)  
+environment did not define `BALCONY_SYSTEM_ID`)
+
 Reviewed candidate: `498047b998e1e0851782e354278b7800e93043ef` plus the
-evidence-only corrections that add this record  
+evidence-only corrections that add this record
+
 Decision: retain the existing public Git history for `v0.1.0`
 
 ## Scope
