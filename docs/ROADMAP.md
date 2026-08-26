@@ -25,7 +25,7 @@ Git history, and the dated verification records remain authoritative.
 | Phase 3 | Added the Azure-free demo, create-only setup, generated MCP registration, and `doctor`. | A new operator could evaluate and configure a node locally with one setup command. |
 | Phase 4 | Added Ed25519 whole-envelope authentication, explicit membership, ingress provenance, rotation/revocation guidance, and Windows ACL gates. | Production transport fails closed on spoofing, malformed authentication, and unsafe runtime inputs. |
 | Phase 5 | Reworked the README and runbooks around install, connect, verify, upgrade, recover, clean-consumer packaging, and known limitations. | PR #2 passed the ordered local verification and review cycle and merged as `2ab0b512`. |
-| Phase 6 | Closes the post-merge provisioning-identity gap and reconciles documentation with the repository's actual public state. | Implemented and locally verified on `codex/open-source-phase6`; Git delivery is pending. |
+| Phase 6 | Closed the post-merge provisioning-identity gap and reconciled documentation with the repository's actual public state. | Implemented, verified, and merged; final delivery and review close-outs are recorded in Git history. |
 
 Current truth:
 

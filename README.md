@@ -180,14 +180,14 @@ node .\dist\cli\index.js setup `
   --authorized-node laptop-a `
   --authorized-node laptop-b `
   --servicebus-namespace replace-with-approved.servicebus.windows.net `
-  --subscription bridge-build `
+  --subscription build-node `
   --auth-mode managed_identity `
   --managed-identity-client-id 11111111-1111-4111-8111-111111111111
 ```
 
-Both `identity --node-id` and `setup --node-id` fail before writing when an
-existing `BALCONY_SYSTEM_ID` names another node. Set it to the node being
-provisioned, or use a clean shell where it is intentionally unset.
+Both `identity --node-id` and `setup --node-id` require
+`BALCONY_SYSTEM_ID` and fail before writing when it is missing or names another
+node. Set it to the node being provisioned.
 
 Register only this production setup's returned MCP snippet. The MCP process
 receives the profile path and SQLite access, but no Azure credential or
