@@ -43,7 +43,10 @@ reviewed tag detached before installing dependencies:
 
 ```powershell
 git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
-Set-Location balcony-agent-bridge
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to clone the GitHub source repository; source installation is unavailable."
+}
+Set-Location balcony-agent-bridge -ErrorAction Stop
 git fetch --tags --force
 if ($LASTEXITCODE -ne 0) {
   throw "Unable to fetch GitHub release tags; source installation is unavailable."
