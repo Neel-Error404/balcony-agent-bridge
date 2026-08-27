@@ -149,12 +149,17 @@ check-level results were retained, and the single required
   `a9a6a6bb354851b142889c77afa9672b205dbe78` received specification and
   quality approval after the red/green, stress, isolated, and foundation
   evidence described above.
-- This Task 2 specification review found omissions in the durable evidence
-  record: the completed post-commit package comparison, release-decision
-  fields, review dispositions, provenance, and the ACL history label were
-  incomplete or missing. This follow-up documentation-only commit corrects
-  those omissions. The pending re-review has not passed and is not claimed as
-  complete.
+- `OBSERVED / RESOLVED`: The Task 2 specification review found omissions in
+  the durable evidence record: the completed post-commit package comparison,
+  release-decision fields, review dispositions, provenance, and the ACL
+  history label were incomplete or missing. The documentation-only follow-up
+  commits `82f9ff9120e401772f8a6b2a9254b496c0798070` and
+  `087b28410df03e3779368f2b20ef7af9b19b15b1` corrected those omissions. The
+  final independent Task 2 specification and quality reviews passed.
+- `OBSERVED / RESOLVED`: The known-limitations P2 evidence gap was corrected
+  by `6cc8d2256254b458cb6351e65a8a1a6cb7b5ab35`, which binds the complete
+  source-candidate limitations to this record as reviewed and accepted; it
+  does not claim that the accepted limitations were fixed.
 
 The retained-public-history decision and its separate review evidence are in
 [the v0.1.0 history privacy review](./SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md).
