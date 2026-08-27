@@ -16,14 +16,21 @@ describe("database migration concurrency", () => {
       temporaryDirectory,
       "bridge.sqlite3",
     );
+    const goPath = path.join(temporaryDirectory, "migration-start");
+    const readyPaths = Array.from({ length: 8 }, (_, index) =>
+      path.join(temporaryDirectory, `migration-ready-${index}`),
+    );
     createVersionOneDatabase(databasePath);
+    const openPromises = readyPaths.map((readyPath) =>
+      openInChild(databasePath, readyPath, goPath),
+    );
     try {
-      const [first, second] = await Promise.all([
-        openInChild(databasePath),
-        openInChild(databasePath),
-      ]);
-      expect(first).toMatchObject({ exitCode: 0, stderr: "" });
-      expect(second).toMatchObject({ exitCode: 0, stderr: "" });
+      await waitForFiles(readyPaths);
+      fs.writeFileSync(goPath, "go", "utf8");
+      const results = await Promise.all(openPromises);
+      for (const result of results) {
+        expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+      }
 
       const database = new Database(databasePath, { readonly: true });
       try {
@@ -61,12 +68,16 @@ describe("database migration concurrency", () => {
         database.close();
       }
     } finally {
+      if (!fs.existsSync(goPath)) {
+        fs.writeFileSync(goPath, "go", "utf8");
+      }
+      await Promise.allSettled(openPromises);
       fs.rmSync(temporaryDirectory, {
         recursive: true,
         force: true,
       });
     }
-  });
+  }, 15_000);
 });
 
 function createVersionOneDatabase(databasePath: string): void {
@@ -106,9 +117,27 @@ function createVersionOneDatabase(databasePath: string): void {
 
 async function openInChild(
   databasePath: string,
+  readyPath: string,
+  goPath: string,
 ): Promise<{ exitCode: number | null; stderr: string }> {
   const script = [
-    'import { BridgeDatabase } from "./src/storage/database.ts";',
+    'import fs from "node:fs";',
+    'import Database from "better-sqlite3";',
+    "const originalPragma = Database.prototype.pragma;",
+    "Database.prototype.pragma = function(source, ...options) {",
+    '  if (source === "journal_mode = WAL") {',
+    '    fs.writeFileSync(process.argv[2], "ready", "utf8");',
+    "    const deadline = Date.now() + 10_000;",
+    "    while (!fs.existsSync(process.argv[3])) {",
+    "      if (Date.now() >= deadline) {",
+    '        throw new Error("Timed out waiting for the WAL migration test barrier");',
+    "      }",
+    "      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);",
+    "    }",
+    "  }",
+    "  return originalPragma.call(this, source, ...options);",
+    "};",
+    'const { BridgeDatabase } = await import("./src/storage/database.ts");',
     "const database = new BridgeDatabase(process.argv[1]);",
     "database.close();",
   ].join(" ");
@@ -122,6 +151,8 @@ async function openInChild(
         "--eval",
         script,
         databasePath,
+        readyPath,
+        goPath,
       ],
       {
         cwd: path.resolve(
@@ -144,4 +175,14 @@ async function openInChild(
       }),
     );
   });
+}
+
+async function waitForFiles(paths: readonly string[]): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!paths.every((filePath) => fs.existsSync(filePath))) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for database open processes");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
