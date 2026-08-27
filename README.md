@@ -91,13 +91,27 @@ if ($LASTEXITCODE -ne 0) {
   throw "Unable to check out the v0.1.0 release tag; source installation is unavailable."
 }
 npm ci
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to install source dependencies; source installation is unavailable."
+}
 npm run build
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to build the v0.1.0 source checkout; source installation is unavailable."
+}
 $nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
 if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
   throw "Unable to resolve the Node application path; source installation is unavailable."
 }
-$bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
+$bridgeCli = (Resolve-Path -LiteralPath .\dist\cli\index.js -ErrorAction Stop).Path
+if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
+  throw "The built balcony-agent-bridge CLI entrypoint is missing; source installation is unavailable."
+}
 & $nodePath $bridgeCli --help
+$cliStarted = $?
+$cliExitCode = $LASTEXITCODE
+if (-not $cliStarted -or $cliExitCode -ne 0) {
+  throw "The built balcony-agent-bridge@0.1.0 CLI did not start; source installation is unavailable."
+}
 ```
 
 Both install paths resolve `$nodePath` and `$bridgeCli`. Keep those values in
