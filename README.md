@@ -42,6 +42,7 @@ From a source checkout:
 ```powershell
 git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
 Set-Location balcony-agent-bridge
+git checkout v0.1.0
 npm ci
 npm run build
 $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path

@@ -45,6 +45,9 @@ describe("public alpha documentation contract", () => {
     expect(readme).toContain(
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
+    expect(readme).toContain(
+      "Set-Location balcony-agent-bridge\ngit checkout v0.1.0\nnpm ci",
+    );
     expect(readme).toContain("--subscription build-node");
     expect(windowsRunbook).toContain('SubscriptionName = "build-node"');
     expect(roadmap).not.toContain("Git delivery is pending");
