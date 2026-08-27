@@ -46,7 +46,7 @@ describe("public alpha documentation contract", () => {
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
     expect(readme).toContain(
-      "Set-Location balcony-agent-bridge\ngit fetch --tags --force\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to fetch GitHub release tags; source installation is unavailable.\"\n}\nif (-not (git tag --list v0.1.0)) {\n  throw \"GitHub has not exposed the v0.1.0 release tag; source installation is unavailable.\"\n}\ngit checkout --detach v0.1.0\nnpm ci",
+      "Set-Location balcony-agent-bridge\ngit fetch --tags --force\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to fetch GitHub release tags; source installation is unavailable.\"\n}\nif (-not (git tag --list v0.1.0)) {\n  throw \"GitHub has not exposed the v0.1.0 release tag; source installation is unavailable.\"\n}\ngit checkout --detach v0.1.0\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to check out the v0.1.0 release tag; source installation is unavailable.\"\n}\nnpm ci",
     );
     expect(readme).toContain("--subscription build-node");
     expect(windowsRunbook).toContain('SubscriptionName = "build-node"');

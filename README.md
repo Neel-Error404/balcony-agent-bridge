@@ -52,6 +52,9 @@ if (-not (git tag --list v0.1.0)) {
   throw "GitHub has not exposed the v0.1.0 release tag; source installation is unavailable."
 }
 git checkout --detach v0.1.0
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to check out the v0.1.0 release tag; source installation is unavailable."
+}
 npm ci
 npm run build
 $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
