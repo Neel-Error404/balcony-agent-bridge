@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 function read(relativePath: string): string {
-  return fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+  return fs
+    .readFileSync(path.join(repositoryRoot, relativePath), "utf8")
+    .replace(/\r\n/g, "\n");
 }
 
 describe("public alpha documentation contract", () => {
