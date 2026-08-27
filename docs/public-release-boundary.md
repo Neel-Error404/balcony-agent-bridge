@@ -80,7 +80,7 @@ alone is not credential remediation. The dated review record is
 
 ## Current Gate
 
-The source repository is public under Apache-2.0. Version `0.1.0` is approved
+The source repository is public under Apache-2.0. Version `0.2.0` is approved
 for a public npm package and GitHub release, the existing public history is
 retained, and GitHub private vulnerability reporting is enabled. Azure and live
 service changes remain separate reviewed operations even when they use the same
@@ -96,6 +96,6 @@ that no unknown secret format exists; manual review remains required.
 
 The owner selected the Apache License 2.0 on 2026-08-25 because its explicit
 patent grant gives infrastructure contributors and adopters clearer protection.
-The public source is governed by that license. Public `0.1.0` npm publication
+The public source is governed by that license. Public `0.2.0` npm publication
 is approved but is not complete until the registry returns the released
 version.

@@ -4,6 +4,7 @@
 
 | Version | Supported |
 | --- | --- |
+| `0.2.x` | Security fixes for the current public alpha |
 | `0.1.x` | Security fixes for the current public alpha |
 | `< 0.1.0` | No |
 
