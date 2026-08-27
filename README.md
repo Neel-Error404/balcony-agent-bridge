@@ -53,13 +53,18 @@ $installedPackage = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom
 if ($installedPackage.version -ne "0.1.0") {
   throw "The installed balcony-agent-bridge version is not 0.1.0; registry installation is unavailable."
 }
-$installedCli = Join-Path $packageDirectory "dist/cli/index.js"
-if (-not (Test-Path -LiteralPath $installedCli -PathType Leaf)) {
+$bridgeCli = Join-Path $packageDirectory "dist/cli/index.js"
+if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
   throw "The installed balcony-agent-bridge@0.1.0 CLI entrypoint is missing; registry installation is unavailable."
 }
-$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop).Path
-& $nodePath $installedCli --help
-if ($LASTEXITCODE -ne 0) {
+$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
+if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
+  throw "Unable to resolve the Node application path; registry installation is unavailable."
+}
+& $nodePath $bridgeCli --help
+$cliStarted = $?
+$cliExitCode = $LASTEXITCODE
+if (-not $cliStarted -or $cliExitCode -ne 0) {
   throw "The installed balcony-agent-bridge@0.1.0 CLI did not start; registry installation is unavailable."
 }
 ```
@@ -87,13 +92,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 npm ci
 npm run build
+$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
+if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
+  throw "Unable to resolve the Node application path; source installation is unavailable."
+}
 $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
-node $bridgeCli --help
+& $nodePath $bridgeCli --help
 ```
 
-The remaining examples use the installed `balcony-agent-bridge` command. When
-working only from the source checkout, replace that command with
-`node $bridgeCli`.
+Both install paths resolve `$nodePath` and `$bridgeCli`. Keep those values in
+the same PowerShell session and invoke the exact resolved CLI as
+`& $nodePath $bridgeCli`; do not rely on a global PATH shim.
 
 To evaluate the exact npm artifact from a source checkout:
 
@@ -133,7 +142,7 @@ configuration.
 Run the deterministic three-node round trip before configuring Azure:
 
 ```powershell
-balcony-agent-bridge demo
+& $nodePath $bridgeCli demo
 ```
 
 The expected JSON contains `"result":"passed"` and `"azure_used":false`.
@@ -148,7 +157,7 @@ SQLite database:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "laptop-a"
-balcony-agent-bridge setup `
+& $nodePath $bridgeCli setup `
   --node-id laptop-a `
   --authorized-node laptop-b `
   --authorized-node build-node
@@ -201,7 +210,7 @@ ACL procedure in `docs/message-authentication.md` for the same output directory:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-balcony-agent-bridge identity `
+& $nodePath $bridgeCli identity `
   --node-id build-node `
   --output-directory "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node-identity"
 ```
@@ -230,7 +239,7 @@ but before it is started, create the matching production profile:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-balcony-agent-bridge setup `
+& $nodePath $bridgeCli setup `
   --config "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node.json" `
   --database "$env:ProgramData\Balcony\AgentBridge\data\bridge.sqlite3" `
   --node-id build-node `
@@ -265,15 +274,15 @@ isolated validation invocation of the bridge service entrypoint, so the CLI
 process does not load signing material:
 
 ```powershell
-balcony-agent-bridge doctor --config "C:\absolute\path\config.json"
-balcony-agent-bridge status --config "C:\absolute\path\config.json"
+& $nodePath $bridgeCli doctor --config "C:\absolute\path\config.json"
+& $nodePath $bridgeCli status --config "C:\absolute\path\config.json"
 ```
 
 After Azure identity and RBAC are ready, explicitly probe only the sender
 link:
 
 ```powershell
-balcony-agent-bridge doctor `
+& $nodePath $bridgeCli doctor `
   --config "C:\absolute\path\config.json" `
   --check-transport
 ```
