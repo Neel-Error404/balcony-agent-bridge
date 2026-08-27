@@ -148,9 +148,13 @@ before tagging or publishing.
 At the time of this record, the candidate has not been pushed or merged, the
 npm package has not been published or installed from the registry, and the
 `v0.1.0` tag and GitHub Release have not been created. The future `v0.1.0` tag
-target **will be exactly `9458a50afeb28fb3f759de53f3889380af983e90`**, even
-if the PR merge tip contains later package-excluded evidence commits, and npm
-publication must use the preserved `9458a50` tarball above. Azure, RBAC,
-service, and live signed multi-node rollout remain separate and deferred.
+must target the eventual final evidence-containing commit (the current tagged
+tree at release creation), so the GitHub source archive retains this final
+provenance record. This evidence-only commit does not change the npm package:
+publication must use the preserved tarball produced from tested package source
+`9458a50afeb28fb3f759de53f3889380af983e90` with SHA-256
+`5cde6070b07ec7b8ca40d0960ac5f40ba8d9eabbf43fa2119a4397a1ae224e09` above.
+Azure, RBAC, service, and live signed multi-node rollout remain separate and
+deferred.
 Approval remains distinct from completion, and each external operation
 requires separate execution evidence.
