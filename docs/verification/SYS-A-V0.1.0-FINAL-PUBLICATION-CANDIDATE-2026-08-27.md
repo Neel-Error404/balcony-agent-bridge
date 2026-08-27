@@ -36,9 +36,11 @@ Four test-first corrections closed the finding:
 | `7c233360496399be4b54ca70e3b2e0e0145c09b4` | Made repository clone and working-directory selection fail closed |
 
 Each correction changed `README.md` together with its foundation documentation
-contract. The final independent specification review passed, and the final
-independent quality review passed on `7c23336`; no review result is
-being inferred from the tests alone.
+contract. The final independent specification and quality reviews passed on
+`7c23336`; their roles, methods, scope, results, and finding dispositions are
+bound to the exact source in the
+[source-install independent review record](./SYS-A-V0.1.0-SOURCE-INSTALL-INDEPENDENT-REVIEW-2026-08-27.md).
+No review result is inferred from the tests alone.
 
 ## Fresh ordered verification on `7c23336`
 
@@ -101,7 +103,10 @@ Tool versions:
 | Forbidden entries | 0 |
 
 The tar listing contained zero `docs/verification/**` entries. A post-evidence
-commit repack is a separate closure check and is not pre-claimed here.
+repack from evidence commit `a6af4c0ef01307e82fd82e6ae5669ed32d2c364d`
+reproduced all seven artifact fields above, with zero forbidden entries and
+zero `docs/verification/**` entries. That refreeze was release-evidence work,
+not part of the narrow source-install reviews.
 
 ## Prior evidence and accepted limitations
 
