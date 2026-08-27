@@ -3,15 +3,19 @@
 ## Decision and evidence boundary
 
 `OBSERVED / TESTED`: The final local publication candidate is source commit
-`7c233360496399be4b54ca70e3b2e0e0145c09b4` on branch
+`ce9fed3c05aa046e4b5bc4853c3169e929ea7fc9` on branch
 `codex/release-v0.1.0`. The checkout started clean, and the complete ordered
 release ladder below passed on that exact source.
 
 This record supersedes the package identity in the earlier
 [release-candidate record](./SYS-A-V0.1.0-RELEASE-CANDIDATE-2026-08-27.md).
-The former source `a9a6a6bb354851b142889c77afa9672b205dbe78` and artifact
-SHA-256 `78b99b42624bcd9ec36651039f9416dd1ec093449117fcc76b37225df9dbf91d`
-remain historical evidence but are not the final publication candidate.
+The former source/artifact pairs
+`a9a6a6bb354851b142889c77afa9672b205dbe78` /
+`78b99b42624bcd9ec36651039f9416dd1ec093449117fcc76b37225df9dbf91d` and
+`7c233360496399be4b54ca70e3b2e0e0145c09b4` /
+`cfdf35053b9ee142f8ca46476cee2a0b0d2d2b007f4fd8d1cd8ddd9a64594d3a`
+remain historical evidence but are superseded and are not the publication
+candidate.
 
 This is a sanitized, durable record of source-bound commands, exit status,
 counts, review outcomes, and artifact metadata. Raw session captures remain
@@ -42,7 +46,13 @@ bound to the exact source in the
 [source-install independent review record](./SYS-A-V0.1.0-SOURCE-INSTALL-INDEPENDENT-REVIEW-2026-08-27.md).
 No review result is inferred from the tests alone.
 
-## Fresh ordered verification on `7c23336`
+A later fresh review of evidence commit `05ad76f` produced two additional P2
+findings covering source-to-tag binding and the registry quickstart. Their
+public links, exact dispositions, follow-up commits, SQLite concurrency
+diagnosis, and final independent review provenance are in the
+[final-head review record](./SYS-A-V0.1.0-FINAL-HEAD-REVIEW-2026-08-27.md).
+
+## Fresh ordered verification on `ce9fed3c`
 
 Every command ran with process-scoped `BALCONY_SYSTEM_ID=SYS-A`, one test level
 at a time. The recorded ladder completed in the manifest order.
@@ -59,13 +69,17 @@ at a time. The recorded ladder completed in the manifest order.
 | 8 | `npm run typecheck` | Pass; no TypeScript diagnostics |
 | 9 | `npm run build` | Pass |
 | 10 | `npm run smoke:mcp` | Pass; connected, 13 tools, status succeeded |
-| 11 | `npm run check:secrets` | Pass; 186 current-tree and reachable-history files scanned, 0 findings |
+| 11 | `npm run check:secrets` | Pass; 188 current-tree and reachable-history files scanned, 0 findings |
 | 12 | `npm audit --omit=dev --audit-level=low` | Pass; 0 vulnerabilities |
 | 13 | `npm run verify:package` | Pass |
 | 14 | `npm run verify:public-alpha` | Pass; isolated clean-consumer workflow completed |
 | 15 | `git diff --check` and clean-tree check | Pass |
 
 Test total: 318 passed and 1 explicit platform skip across 60 test files.
+The integration level initially exposed a reproducible `SQLITE_BUSY` race;
+after the bounded WAL-initialization fix and deterministic regression at
+`ce9fed3c`, the focused test passed 1/1 and the final integration run passed
+34/34. The diagnosis and repetition counts are in the final-head review record.
 
 Additional release surfaces also passed:
 
@@ -89,24 +103,24 @@ Tool versions:
 ## Final source artifact
 
 `OBSERVED`: `npm pack --json` at source commit
-`7c233360496399be4b54ca70e3b2e0e0145c09b4` produced:
+`ce9fed3c05aa046e4b5bc4853c3169e929ea7fc9` produced:
 
 | Property | Value |
 |---|---|
 | Filename | `balcony-agent-bridge-0.1.0.tgz` |
-| npm SHA-1 shasum | `b98f88b09d56beac2aa04c5ca55d7f9bcad369bc` |
-| Independent SHA-256 | `cfdf35053b9ee142f8ca46476cee2a0b0d2d2b007f4fd8d1cd8ddd9a64594d3a` |
-| npm SHA-512 integrity | `sha512-v7TpzN8eJvYjZzFn+T4em37yaowb0hQWZ5rrBGd/UF/J88rh5TqvI8majld670ZXRFA2p9YAwOszKKZXeiPQxg==` |
+| npm SHA-1 shasum | `d80a744c2d1eee1b237b2ee7b2593b86f7c7ef33` |
+| Independent SHA-256 | `de7544bd582d816192635894a0da6514350ed46d166e1ace48cb3e3ea97fee7d` |
+| npm SHA-512 integrity | `sha512-X6FaMwPSrOTziHMdvYdFjA/mBylZMfgEGLpAw9lNN+AyN3ml9VokGIiTSUhRFZbBsHdb9+G8uVRnPHZnUefKvg==` |
 | File count | 102 |
-| Packed size | 124,691 bytes |
-| Unpacked size | 633,206 bytes |
+| Packed size | 125,919 bytes |
+| Unpacked size | 638,202 bytes |
 | Forbidden entries | 0 |
 
-The tar listing contained zero `docs/verification/**` entries. A post-evidence
-repack from evidence commit `a6af4c0ef01307e82fd82e6ae5669ed32d2c364d`
-reproduced all seven artifact fields above, with zero forbidden entries and
-zero `docs/verification/**` entries. That refreeze was release-evidence work,
-not part of the narrow source-install reviews.
+The tar listing contained zero `docs/verification/**` entries. The preserved
+tarball produced from `ce9fed3c` is the only artifact authorized as the future
+npm publication input. Evidence-only commits do not change package contents,
+but a post-merge package comparison against every field above is still required
+before tagging or publishing.
 
 ## Prior evidence and accepted limitations
 
@@ -115,17 +129,22 @@ not part of the narrow source-install reviews.
   [prior release-candidate record](./SYS-A-V0.1.0-RELEASE-CANDIDATE-2026-08-27.md).
 - Independent evidence-review provenance remains in the
   [Task 2 independent review record](./SYS-A-V0.1.0-TASK2-INDEPENDENT-REVIEW-2026-08-27.md).
+- Final-head review provenance and the `SQLITE_BUSY` disposition remain in the
+  [final-head review record](./SYS-A-V0.1.0-FINAL-HEAD-REVIEW-2026-08-27.md).
 - The retained-public-history decision remains in the
   [history privacy review](./SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md).
-- The complete [known limitations](../known-limitations.md) at `7c23336`
+- The complete [known limitations](../known-limitations.md) at `ce9fed3c`
   remain accepted and canonical. This record does not imply that any accepted
-  limitation was fixed by the README corrections.
+  limitation was fixed except where an exact disposition is recorded above.
 
 ## Deferred operations
 
 At the time of this record, the candidate has not been pushed or merged, the
 npm package has not been published or installed from the registry, and the
-`v0.1.0` tag and GitHub Release have not been created. Azure, RBAC, service,
-and live signed multi-node rollout state are unchanged. Approval remains
-distinct from completion, and each external operation requires separate
-execution evidence.
+`v0.1.0` tag and GitHub Release have not been created. The future `v0.1.0` tag
+target **will be exactly `ce9fed3c05aa046e4b5bc4853c3169e929ea7fc9`**, even
+if the PR merge tip contains later package-excluded evidence commits, and npm
+publication must use the preserved `ce9fed3c` tarball above. Azure, RBAC,
+service, and live signed multi-node rollout remain separate and deferred.
+Approval remains distinct from completion, and each external operation
+requires separate execution evidence.
