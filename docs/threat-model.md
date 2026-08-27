@@ -122,13 +122,15 @@ flowchart LR
 | Membership file | Add unknown fields, duplicate peers/keys, wrong key type/ID, or peer-list drift | Startup/configuration rejection | Foundation membership tests |
 | Signing-key file | Supply relative, symlinked, oversized, non-PKCS8, or non-Ed25519 file | Startup/configuration rejection without value echo | Foundation authentication/config tests |
 | Identity output | Pre-create or symlink output files; repeat generation | No overwrite; generic failure | Foundation identity and CLI integration tests |
-| Authorized peer | Send valid but malicious task content or high traffic | Authenticated and routed; downstream allowlists, secret policy, idempotency, quotas, and human governance remain necessary | Existing envelope, dispatcher, payload, and recovery suites |
+| Authorized peer | Send valid but malicious task content or request an ungranted project | Exact active peer/resource grant plus enabled resource is required before project resolution, context loading, or execution | A granted peer can inspect the complete registered tree; filesystem review remains necessary |
 | Local MCP caller | Read an explicitly requested inbox item | Message body may be returned by design | Local OS/process authorization; not expanded in Phase 4 |
 | Azure principal | Publish to topic outside intended logical edge | Receiver rejects invalid signed target/origin, but broker/DLQ load remains | Azure RBAC/filter review plus runtime monitoring, owner-gated |
 
-All authorized origins currently share the same project authorization for each
-dispatcher registry entry marked `peer_readable`; v0.1 has no per-origin
-project ACL. Register only projects that every configured peer may inspect.
+`peer_readable: true` is only the machine-local path eligibility gate. Durable
+SQLite policy independently requires an enabled resource and an active grant
+for the exact authenticated origin. Missing, disabled, revoked, malformed, or
+unauthenticated state fails closed before project resolution. Existing v0.1
+state receives no grants automatically during schema-v8 migration.
 File checks are intentionally defense in depth, not protection from a local
 administrator: an attacker able to replace a file between validation and read,
 or to control the bridge service account, is already inside the host trust

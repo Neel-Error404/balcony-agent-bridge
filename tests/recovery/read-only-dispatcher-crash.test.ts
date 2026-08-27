@@ -54,9 +54,11 @@ describe("read-only dispatcher crash recovery", () => {
       }),
     );
     database = new BridgeDatabase(databasePath);
+    database.registerResource("voiceai");
+    database.grantPeerResource("SYS-A", "voiceai");
     const original = incomingEnvelope();
     const start = new Date();
-    database.persistIncoming(original, 1, start);
+    database.persistIncoming(original, 1, start, true);
     const deadClaim = database.claimReadOnlyDispatchInbox(
       "dead-dispatcher",
       1,
@@ -123,7 +125,7 @@ describe("read-only dispatcher crash recovery", () => {
     database = new BridgeDatabase(databasePath);
     const original = incomingEnvelope();
     const start = new Date();
-    database.persistIncoming(original, 1, start);
+    database.persistIncoming(original, 1, start, true);
     const stale = database.claimReadOnlyDispatchInbox(
       "stale-dispatcher",
       1,
@@ -181,6 +183,56 @@ describe("read-only dispatcher crash recovery", () => {
     expect(database.getStatus().outbox.pending).toBe(1);
   });
 
+  it("rechecks a revoked resource grant when an expired claim is recovered", async () => {
+    temporaryDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-dispatcher-revocation-"),
+    );
+    const databasePath = path.join(temporaryDirectory, "bridge.sqlite3");
+    const projectPath = path.join(temporaryDirectory, "project");
+    const registryPath = path.join(temporaryDirectory, "projects.json");
+    fs.mkdirSync(projectPath);
+    fs.writeFileSync(
+      registryPath,
+      JSON.stringify({
+        schema_version: "1.0",
+        projects: [
+          {
+            key: "voiceai",
+            path: projectPath,
+            peer_readable: true,
+          },
+        ],
+      }),
+    );
+    database = new BridgeDatabase(databasePath);
+    database.registerResource("voiceai");
+    database.grantPeerResource("SYS-A", "voiceai");
+    const original = incomingEnvelope();
+    const start = new Date();
+    database.persistIncoming(original, 1, start, true);
+    database.claimReadOnlyDispatchInbox(
+      "dead-dispatcher",
+      1,
+      30,
+      start,
+    );
+    database.revokePeerResource("SYS-A", "voiceai");
+
+    const executor = new RecoveryCodexExecutor();
+    const dispatcher = new ReadOnlyDispatcher(
+      dispatcherConfig(databasePath, registryPath),
+      database,
+      ProjectRegistry.load(registryPath),
+      executor,
+    );
+    expect(
+      await dispatcher.runOnce(new Date(start.getTime() + 31_000)),
+    ).toBe(1);
+    expect(executor.inputs).toHaveLength(0);
+    expect(database.getStatus().inbox.rejected).toBe(1);
+    expect(database.getStatus().outbox.pending).toBe(1);
+  });
+
   it("rejects with a fresh failure result when the prior result is quarantined", async () => {
     temporaryDirectory = fs.mkdtempSync(
       path.join(os.tmpdir(), "balcony-dispatcher-quarantine-"),
@@ -203,8 +255,10 @@ describe("read-only dispatcher crash recovery", () => {
       }),
     );
     database = new BridgeDatabase(databasePath);
+    database.registerResource("voiceai");
+    database.grantPeerResource("SYS-A", "voiceai");
     const original = incomingEnvelope();
-    database.persistIncoming(original, 1);
+    database.persistIncoming(original, 1, new Date(), true);
     const service = new AgentBridgeService(
       bridgeConfig(databasePath),
       database,

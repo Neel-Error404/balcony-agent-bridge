@@ -325,6 +325,79 @@ function runInstallSmoke(useCleanCache) {
       throw new Error("Packaged CLI setup was not idempotent");
     }
 
+    const registeredResource = runInstalledCli(
+      cliBin,
+      [
+        "resource",
+        "register",
+        "--config",
+        profilePath,
+        "--resource-id",
+        "package-resource",
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(registeredResource, 0, "packaged CLI resource registration");
+    const registeredResourcePayload = JSON.parse(registeredResource.stdout);
+    if (
+      registeredResourcePayload.resource?.resource_id !== "package-resource" ||
+      registeredResourcePayload.resource?.enabled !== true
+    ) {
+      throw new Error("Packaged CLI did not register the expected resource");
+    }
+
+    const createdGrant = runInstalledCli(
+      cliBin,
+      [
+        "grant",
+        "create",
+        "--config",
+        profilePath,
+        "--peer-id",
+        "node-b",
+        "--resource-id",
+        "package-resource",
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(createdGrant, 0, "packaged CLI grant creation");
+    if (JSON.parse(createdGrant.stdout).grant?.state !== "active") {
+      throw new Error("Packaged CLI did not create an active resource grant");
+    }
+
+    const listedGrants = runInstalledCli(
+      cliBin,
+      ["grant", "list", "--config", profilePath, "--peer-id", "node-b"],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(listedGrants, 0, "packaged CLI grant listing");
+    if (JSON.parse(listedGrants.stdout).grants?.length !== 1) {
+      throw new Error("Packaged CLI did not list the expected resource grant");
+    }
+
+    const revokedGrant = runInstalledCli(
+      cliBin,
+      [
+        "grant",
+        "revoke",
+        "--config",
+        profilePath,
+        "--peer-id",
+        "node-b",
+        "--resource-id",
+        "package-resource",
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(revokedGrant, 0, "packaged CLI grant revocation");
+    if (JSON.parse(revokedGrant.stdout).grant?.state !== "revoked") {
+      throw new Error("Packaged CLI did not persist resource grant revocation");
+    }
+
     const defaultDataRoot = path.join(temporaryDirectory, "default-data-root");
     const defaultEnvironment = {
       ...process.env,

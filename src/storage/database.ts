@@ -5,11 +5,17 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import {
+  SystemIdSchema,
   parseEnvelope,
   type BridgeEnvelope,
   type MessageKind,
   type SystemId,
 } from "../contracts/envelope.js";
+import {
+  PeerResourceGrantStateSchema,
+  ResourceIdSchema,
+  type PeerResourceGrantState,
+} from "../contracts/resource-authorization.js";
 import {
   ConsultationRunSchema,
   type ConsultationRun,
@@ -35,7 +41,7 @@ export type InboxState =
   | "rejected"
   | "quarantined";
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 interface OutboxRow {
   message_id: string;
@@ -89,6 +95,22 @@ export interface ClaimedInboxMessage {
   envelope: BridgeEnvelope;
   claimToken: string;
   claimUntilUtc: string;
+  authenticatedIngress: boolean;
+}
+
+export interface RegisteredResource {
+  resourceId: string;
+  enabled: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface PeerResourceGrant {
+  peerSystemId: SystemId;
+  resourceId: string;
+  state: PeerResourceGrantState;
+  grantedAtUtc: string;
+  revokedAtUtc?: string;
 }
 
 export interface InboxListItem {
@@ -415,6 +437,237 @@ export class BridgeDatabase {
 
   public close(): void {
     this.database.close();
+  }
+
+  public registerResource(
+    resourceIdValue: string,
+    now = new Date(),
+  ): RegisteredResource & { created: boolean } {
+    const resourceId = ResourceIdSchema.parse(resourceIdValue);
+    const nowUtc = now.toISOString();
+    const result = this.database
+      .prepare(
+        `INSERT OR IGNORE INTO resources (
+           resource_id, enabled, created_at_utc, updated_at_utc
+         ) VALUES (?, 1, ?, ?)`,
+      )
+      .run(resourceId, nowUtc, nowUtc);
+    const resource = this.getResource(resourceId);
+    if (!resource) {
+      throw new StateTransitionError(
+        `Resource '${resourceId}' could not be registered`,
+      );
+    }
+    return { ...resource, created: result.changes === 1 };
+  }
+
+  public listResources(): RegisteredResource[] {
+    const rows = this.database
+      .prepare(
+        `SELECT resource_id, enabled, created_at_utc, updated_at_utc
+         FROM resources
+         ORDER BY resource_id`,
+      )
+      .all() as Array<{
+      resource_id: string;
+      enabled: number;
+      created_at_utc: string;
+      updated_at_utc: string;
+    }>;
+    return rows.map((row) => ({
+      resourceId: row.resource_id,
+      enabled: row.enabled === 1,
+      createdAtUtc: row.created_at_utc,
+      updatedAtUtc: row.updated_at_utc,
+    }));
+  }
+
+  public setResourceEnabled(
+    resourceIdValue: string,
+    enabled: boolean,
+    now = new Date(),
+  ): RegisteredResource {
+    const resourceId = ResourceIdSchema.parse(resourceIdValue);
+    const result = this.database
+      .prepare(
+        `UPDATE resources
+         SET enabled = ?, updated_at_utc = ?
+         WHERE resource_id = ?`,
+      )
+      .run(enabled ? 1 : 0, now.toISOString(), resourceId);
+    if (result.changes !== 1) {
+      throw new StateTransitionError(
+        `Resource '${resourceId}' does not exist`,
+      );
+    }
+    return this.getResource(resourceId)!;
+  }
+
+  public grantPeerResource(
+    peerSystemIdValue: string,
+    resourceIdValue: string,
+    now = new Date(),
+  ): PeerResourceGrant {
+    const peerSystemId = SystemIdSchema.parse(peerSystemIdValue);
+    const resourceId = ResourceIdSchema.parse(resourceIdValue);
+    if (!this.getResource(resourceId)) {
+      throw new StateTransitionError(
+        `Resource '${resourceId}' does not exist`,
+      );
+    }
+    const nowUtc = now.toISOString();
+    const transaction = this.database.transaction(() => {
+      const existing = this.getPeerResourceGrant(peerSystemId, resourceId);
+      if (!existing) {
+        this.database
+          .prepare(
+            `INSERT INTO peer_resource_grants (
+               peer_system_id, resource_id, state, granted_at_utc, revoked_at_utc
+             ) VALUES (?, ?, 'active', ?, NULL)`,
+          )
+          .run(peerSystemId, resourceId, nowUtc);
+      } else if (existing.state === "revoked") {
+        this.database
+          .prepare(
+            `UPDATE peer_resource_grants
+             SET state = 'active', granted_at_utc = ?, revoked_at_utc = NULL
+             WHERE peer_system_id = ? AND resource_id = ?`,
+          )
+          .run(nowUtc, peerSystemId, resourceId);
+      }
+      return this.getPeerResourceGrant(peerSystemId, resourceId)!;
+    });
+    return transaction.immediate();
+  }
+
+  public listPeerResourceGrants(
+    peerSystemIdValue?: string,
+  ): PeerResourceGrant[] {
+    const peerSystemId = peerSystemIdValue === undefined
+      ? undefined
+      : SystemIdSchema.parse(peerSystemIdValue);
+    const rows = this.database
+      .prepare(
+        `SELECT peer_system_id, resource_id, state, granted_at_utc, revoked_at_utc
+         FROM peer_resource_grants
+         ${peerSystemId === undefined ? "" : "WHERE peer_system_id = ?"}
+         ORDER BY peer_system_id, resource_id`,
+      )
+      .all(...(peerSystemId === undefined ? [] : [peerSystemId])) as Array<{
+      peer_system_id: string;
+      resource_id: string;
+      state: PeerResourceGrantState;
+      granted_at_utc: string;
+      revoked_at_utc: string | null;
+    }>;
+    return rows.map((row) => ({
+      peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+      resourceId: ResourceIdSchema.parse(row.resource_id),
+      state: PeerResourceGrantStateSchema.parse(row.state),
+      grantedAtUtc: row.granted_at_utc,
+      ...(row.revoked_at_utc ? { revokedAtUtc: row.revoked_at_utc } : {}),
+    }));
+  }
+
+  public revokePeerResource(
+    peerSystemIdValue: string,
+    resourceIdValue: string,
+    now = new Date(),
+  ): PeerResourceGrant {
+    const peerSystemId = SystemIdSchema.parse(peerSystemIdValue);
+    const resourceId = ResourceIdSchema.parse(resourceIdValue);
+    const existing = this.getPeerResourceGrant(peerSystemId, resourceId);
+    if (!existing) {
+      throw new StateTransitionError(
+        `Grant for peer '${peerSystemId}' and resource '${resourceId}' does not exist`,
+      );
+    }
+    if (existing.state === "active") {
+      this.database
+        .prepare(
+          `UPDATE peer_resource_grants
+           SET state = 'revoked', revoked_at_utc = ?
+           WHERE peer_system_id = ? AND resource_id = ?`,
+        )
+        .run(now.toISOString(), peerSystemId, resourceId);
+    }
+    return this.getPeerResourceGrant(peerSystemId, resourceId)!;
+  }
+
+  public isPeerAuthorizedForResource(
+    peerSystemIdValue: string,
+    resourceIdValue: string,
+  ): boolean {
+    const peerSystemId = SystemIdSchema.safeParse(peerSystemIdValue);
+    const resourceId = ResourceIdSchema.safeParse(resourceIdValue);
+    if (!peerSystemId.success || !resourceId.success) {
+      return false;
+    }
+    return Boolean(
+      this.database
+        .prepare(
+          `SELECT 1
+           FROM peer_resource_grants AS grant_record
+           INNER JOIN resources AS resource
+             ON resource.resource_id = grant_record.resource_id
+           WHERE grant_record.peer_system_id = ?
+             AND grant_record.resource_id = ?
+             AND grant_record.state = 'active'
+             AND grant_record.revoked_at_utc IS NULL
+             AND resource.enabled = 1`,
+        )
+        .get(peerSystemId.data, resourceId.data),
+    );
+  }
+
+  private getResource(resourceId: string): RegisteredResource | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT resource_id, enabled, created_at_utc, updated_at_utc
+         FROM resources WHERE resource_id = ?`,
+      )
+      .get(resourceId) as {
+      resource_id: string;
+      enabled: number;
+      created_at_utc: string;
+      updated_at_utc: string;
+    } | undefined;
+    return row
+      ? {
+          resourceId: row.resource_id,
+          enabled: row.enabled === 1,
+          createdAtUtc: row.created_at_utc,
+          updatedAtUtc: row.updated_at_utc,
+        }
+      : undefined;
+  }
+
+  private getPeerResourceGrant(
+    peerSystemId: SystemId,
+    resourceId: string,
+  ): PeerResourceGrant | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT peer_system_id, resource_id, state, granted_at_utc, revoked_at_utc
+         FROM peer_resource_grants
+         WHERE peer_system_id = ? AND resource_id = ?`,
+      )
+      .get(peerSystemId, resourceId) as {
+      peer_system_id: string;
+      resource_id: string;
+      state: PeerResourceGrantState;
+      granted_at_utc: string;
+      revoked_at_utc: string | null;
+    } | undefined;
+    return row
+      ? {
+          peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+          resourceId: ResourceIdSchema.parse(row.resource_id),
+          state: PeerResourceGrantStateSchema.parse(row.state),
+          grantedAtUtc: row.granted_at_utc,
+          ...(row.revoked_at_utc ? { revokedAtUtc: row.revoked_at_utc } : {}),
+        }
+      : undefined;
   }
 
   public getConsultationRun(
@@ -1207,7 +1460,8 @@ export class BridgeDatabase {
       const rows = this.database
         .prepare(
           `SELECT message_id, envelope_json, payload_sha256, state,
-                  claim_owner, claim_token_hash, claim_until_utc
+                  claim_owner, claim_token_hash, claim_until_utc,
+                  authenticated_ingress
            FROM inbox
            WHERE state = 'available'
              ${expirationFilter}
@@ -1244,6 +1498,7 @@ export class BridgeDatabase {
           envelope: parseEnvelope(JSON.parse(row.envelope_json)),
           claimToken,
           claimUntilUtc,
+          authenticatedIngress: row.authenticated_ingress === 1,
         });
       }
       return claimed;
@@ -1990,6 +2245,47 @@ export class BridgeDatabase {
       `);
     });
     ingressProvenanceMigration.immediate();
+
+    const resourceAuthorizationMigration = this.database.transaction(() => {
+      const alreadyApplied = this.database
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = 8")
+        .get();
+      if (alreadyApplied) {
+        return;
+      }
+      this.database.exec(`
+        CREATE TABLE resources (
+          resource_id TEXT PRIMARY KEY,
+          enabled INTEGER NOT NULL DEFAULT 1
+            CHECK (enabled IN (0, 1)),
+          created_at_utc TEXT NOT NULL,
+          updated_at_utc TEXT NOT NULL,
+          CHECK (resource_id = lower(resource_id))
+        );
+
+        CREATE TABLE peer_resource_grants (
+          peer_system_id TEXT NOT NULL,
+          resource_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
+          granted_at_utc TEXT NOT NULL,
+          revoked_at_utc TEXT,
+          PRIMARY KEY (peer_system_id, resource_id),
+          FOREIGN KEY (resource_id) REFERENCES resources(resource_id)
+            ON UPDATE CASCADE ON DELETE RESTRICT,
+          CHECK (
+            (state = 'active' AND revoked_at_utc IS NULL) OR
+            (state = 'revoked' AND revoked_at_utc IS NOT NULL)
+          )
+        );
+
+        CREATE INDEX idx_peer_resource_grants_resource
+          ON peer_resource_grants (resource_id, state, peer_system_id);
+
+        INSERT INTO schema_migrations (version, applied_at_utc)
+        VALUES (8, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      `);
+    });
+    resourceAuthorizationMigration.immediate();
   }
 
   private assertSupportedSchemaVersion(): void {

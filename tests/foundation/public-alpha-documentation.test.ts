@@ -156,4 +156,22 @@ describe("public alpha documentation contract", () => {
     expect(dispatcherEnvironment).not.toContain("BALCONY_SERVICEBUS_NAMESPACE");
     expect(dispatcherEnvironment).not.toContain("BALCONY_MESSAGE_AUTH_SIGNING_KEY_PATH");
   });
+
+  it("documents explicit deny-by-default per-peer resource authorization", () => {
+    const readme = read("README.md");
+    const configuration = read("docs/configuration.md");
+    const runbook = read("docs/runbooks/read-only-dispatcher.md");
+    const limitations = read("docs/known-limitations.md");
+
+    for (const document of [readme, configuration, runbook]) {
+      expect(document).toContain("peer_readable: true");
+      expect(document).toMatch(/does not authorize|never create/iu);
+      expect(document).toContain("grant create");
+      expect(document).toContain("grant revoke");
+    }
+    expect(configuration).toContain("schema v8");
+    expect(configuration).toContain("empty resource and grant tables");
+    expect(limitations).toContain("schema-v8 resource authorization");
+    expect(limitations).toContain("do not provide file-level filtering");
+  });
 });

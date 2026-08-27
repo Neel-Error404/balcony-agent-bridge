@@ -52,6 +52,8 @@ describe("ReadOnlyDispatcher", () => {
       }),
     );
     registry = ProjectRegistry.load(registryPath);
+    database.registerResource("voiceai");
+    database.grantPeerResource("SYS-A", "voiceai");
     executor = new FakeCodexExecutor();
     dispatcher = new ReadOnlyDispatcher(
       dispatcherConfig(registryPath),
@@ -68,9 +70,9 @@ describe("ReadOnlyDispatcher", () => {
   });
 
   it("claims only explicitly marked read-only tasks", async () => {
-    database.persistIncoming(incomingEnvelope("manual-task", false), 1);
+    database.persistIncoming(incomingEnvelope("manual-task", false), 1, new Date(), true);
     const dispatchable = incomingEnvelope("dispatch-task", true);
-    database.persistIncoming(dispatchable, 1);
+    database.persistIncoming(dispatchable, 1, new Date(), true);
 
     expect(await dispatcher.runOnce()).toBe(1);
     expect(executor.inputs).toHaveLength(1);
@@ -94,7 +96,7 @@ describe("ReadOnlyDispatcher", () => {
 
   it("rejects projects outside the machine-local allowlist", async () => {
     const message = incomingEnvelope("unknown-project", true, "trading");
-    database.persistIncoming(message, 1);
+    database.persistIncoming(message, 1, new Date(), true);
 
     expect(await dispatcher.runOnce()).toBe(1);
     expect(executor.inputs).toHaveLength(0);
@@ -106,7 +108,7 @@ describe("ReadOnlyDispatcher", () => {
     executor.result = {
       output: ["-----BEGIN ", "PRIVATE KEY-----"].join(""),
     };
-    database.persistIncoming(incomingEnvelope("unsafe-output", true), 1);
+    database.persistIncoming(incomingEnvelope("unsafe-output", true), 1, new Date(), true);
 
     expect(await dispatcher.runOnce()).toBe(1);
     expect(database.getStatus().inbox.rejected).toBe(1);
@@ -125,7 +127,7 @@ describe("ReadOnlyDispatcher", () => {
 
   it("leaves unexpected local failures recoverable instead of rejecting the task", async () => {
     executor.error = new Error("Synthetic local database-adjacent failure");
-    database.persistIncoming(incomingEnvelope("transient-error", true), 1);
+    database.persistIncoming(incomingEnvelope("transient-error", true), 1, new Date(), true);
 
     await expect(dispatcher.runOnce()).rejects.toThrow(
       /Synthetic local database-adjacent failure/,
@@ -147,7 +149,7 @@ describe("ReadOnlyDispatcher", () => {
         claimRenewalIntervalMs: 10,
       },
     );
-    database.persistIncoming(incomingEnvelope("renewal", true), 1);
+    database.persistIncoming(incomingEnvelope("renewal", true), 1, new Date(), true);
 
     expect(await slowDispatcher.runOnce()).toBe(1);
     expect(renewal).toHaveBeenCalled();
@@ -180,6 +182,8 @@ describe("ReadOnlyDispatcher", () => {
         },
       }),
       1,
+      new Date(),
+      true,
     );
     database.persistIncoming(
       createEnvelope({
@@ -208,6 +212,8 @@ describe("ReadOnlyDispatcher", () => {
         },
       }),
       1,
+      new Date(),
+      true,
     );
 
     expect(await dispatcher.runOnce()).toBe(1);
@@ -234,6 +240,8 @@ describe("ReadOnlyDispatcher", () => {
     database.persistIncoming(
       incomingEnvelope("renewal-failure", true),
       1,
+      new Date(),
+      true,
     );
 
     await expect(slowDispatcher.runOnce()).rejects.toThrow(

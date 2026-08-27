@@ -46,7 +46,9 @@ describe("autonomous consultation recovery", () => {
     const request = incomingRequest();
 
     let database = openDatabase(databasePath);
-    database.persistIncoming(request, 1, now(0));
+    database.registerResource("balcony-agent-bridge");
+    database.grantPeerResource("SYS-A", "balcony-agent-bridge");
+    database.persistIncoming(request, 1, now(0), true);
     const firstExecutor = new RestartExecutor([
       result({
         outcome: "needs_information",

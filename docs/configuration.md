@@ -102,6 +102,38 @@ and `BALCONY_GIT_EXECUTABLE_SHA256`. Follow
 `docs/runbooks/read-only-dispatcher.md`; the dispatcher is not part of initial
 node connectivity.
 
+## Per-Peer Resource Authorization
+
+The dispatcher project registry and the durable authorization registry serve
+different purposes. `BALCONY_DISPATCHER_PROJECTS_PATH` maps a project key to a
+validated local directory. SQLite schema v8 records whether that same key is an
+enabled resource and which exact peer IDs have active grants. Both conditions
+must pass. `peer_readable: true`, message authentication, and membership alone
+never create a resource grant.
+
+Run the operator commands against the same profile/database used by the bridge
+and dispatcher:
+
+```powershell
+$env:BALCONY_SYSTEM_ID = "build-node"
+& $nodePath $bridgeCli resource register --config C:\absolute\config.json --resource-id voiceai
+& $nodePath $bridgeCli grant create --config C:\absolute\config.json --peer-id laptop-a --resource-id voiceai
+& $nodePath $bridgeCli resource list --config C:\absolute\config.json
+& $nodePath $bridgeCli grant list --config C:\absolute\config.json
+```
+
+Use `resource disable` to stop every peer from reaching one resource, and use
+`grant revoke` for one peer/resource pair. Re-enable a registered resource with
+`resource enable`; recreate a revoked grant with `grant create`. Resource IDs
+are lowercase-normalized and must match the configured project key. Grant
+creation accepts only peers already present in `authorizedNodeIds`.
+
+Upgrading an existing v0.1 database creates empty resource and grant tables.
+It never converts `peer_readable: true` or an authenticated membership entry
+into an authorization grant. Register and grant each intended pair explicitly
+before starting or restarting a dispatcher; otherwise requests are rejected
+without resolving the project path or starting Codex.
+
 ## Configuration That Must Stay Local
 
 Never commit or package:

@@ -87,8 +87,14 @@ relay, or GitHub-backed queue can implement the same seam, but must preserve
 at-least-once delivery, stable message IDs, acknowledgement behavior, and the
 secret policy.
 
-Project context is a different seam. Today the dispatcher maps a stable project
-key to one machine-local allowlisted directory and Codex reads that directory.
+Project context is a different seam. The dispatcher maps a stable project key
+to one machine-local allowlisted directory, then requires an enabled durable
+resource record and an active SQLite grant for the exact authenticated
+`origin_system` and project key before it resolves conversation context or
+starts Codex. `peer_readable: true` makes the local path eligible; it is not a
+grant. Existing v0.1 databases migrate with empty authorization tables, so no
+authenticated peer gains resource access implicitly.
+
 The bridge has no generalized memory provider, LangGraph Store integration,
 Letta integration, remote repository reader, or file-transfer protocol. Such a
 connector should produce bounded evidence for an executor; it should not change

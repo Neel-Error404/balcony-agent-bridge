@@ -179,6 +179,27 @@ release/tag, npm, and live-deployment decisions are explicit rather than
 implied. Phase 6 does not rewrite Git history, publish a package, or mutate
 Azure or live services.
 
+## Phase 2A: Per-Peer Resource Authorization
+
+Status: implemented and locally verified on an uncommitted development branch
+on 2026-08-27. It is not part of the published `v0.1.0` npm/GitHub artifact and
+has not been deployed to either operational node.
+
+- Add an additive SQLite resource registry and exact peer/resource grants.
+- Require authenticated ingress, an enabled resource, and an active exact
+  grant before either dispatcher mode resolves project context or executes.
+- Keep `peer_readable: true` as a local path eligibility gate, never as an
+  authorization grant.
+- Add CLI-only operator commands to register/list/enable/disable resources and
+  create/list/revoke grants.
+- Migrate v0.1 databases to schema v8 with empty authorization state so no
+  existing authenticated peer receives implicit resource access.
+- Preserve the v0.1 signed envelope and transport wire formats.
+
+Exit: focused deny/grant/revoke tests and the full local verification ladder
+pass, including migration, recovery, signed-boundary, and clean package checks.
+Git delivery, publication, and operational rollout remain owner-gated.
+
 ## Deferred Until Demand Is Proven
 
 - hosted discovery or relay services;

@@ -18,7 +18,7 @@ describe("generic node database migration", () => {
     try {
       database
         .prepare(
-          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (8, ?)",
+          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (9, ?)",
         )
         .run("2026-08-25T00:00:00.000Z");
     } finally {
@@ -26,7 +26,7 @@ describe("generic node database migration", () => {
     }
 
     expect(() => new BridgeDatabase(databasePath)).toThrow(
-      "newer than supported version 7",
+      "newer than supported version 8",
     );
     fs.rmSync(root, { recursive: true, force: true });
   });

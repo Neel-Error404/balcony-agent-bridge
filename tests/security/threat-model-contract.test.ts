@@ -18,7 +18,9 @@ describe("Phase 4 security documentation", () => {
       expect(threatModel).toContain(heading);
     }
     expect(threatModel).toMatch(/no unsigned compatibility\s+fallback/u);
-    expect(threatModel).toMatch(/no per-origin\s+project ACL/u);
+    expect(threatModel).toContain("active grant");
+    expect(threatModel).toContain("exact authenticated origin");
+    expect(threatModel).toContain("no grants automatically");
     expect(threatModel).toContain("Repository: balcony-agent-bridge-open-source");
     expect(threatModel).toContain("Version:");
   });

@@ -21,11 +21,14 @@ const REQUIRED_TABLES = [
   "delivery_attempts",
   "runtime_state",
   "consultation_runs",
+  "resources",
+  "peer_resource_grants",
 ] as const;
 const REQUIRED_INDEXES = [
   "idx_outbox_dispatch",
   "idx_inbox_claim",
   "idx_inbox_causation",
+  "idx_peer_resource_grants_resource",
 ] as const;
 const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readonly string[]>> = {
   schema_migrations: ["version", "applied_at_utc"],
@@ -96,6 +99,19 @@ const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readon
     "run_json",
     "created_at_utc",
     "updated_at_utc",
+  ],
+  resources: [
+    "resource_id",
+    "enabled",
+    "created_at_utc",
+    "updated_at_utc",
+  ],
+  peer_resource_grants: [
+    "peer_system_id",
+    "resource_id",
+    "state",
+    "granted_at_utc",
+    "revoked_at_utc",
   ],
 };
 const TRANSPORT_TIMEOUT_MS = 10_000;

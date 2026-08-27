@@ -63,6 +63,13 @@ describe("autonomous consultation round trip", () => {
 
     const sysADatabase = openDatabase(path.join(root, "sys-a.sqlite3"));
     const sysBDatabase = openDatabase(path.join(root, "sys-b.sqlite3"));
+    for (const [database, peer] of [
+      [sysADatabase, "SYS-B"],
+      [sysBDatabase, "SYS-A"],
+    ] as const) {
+      database.registerResource("balcony-agent-bridge");
+      database.grantPeerResource(peer, "balcony-agent-bridge");
+    }
     const sysAConfig = bridgeConfig("SYS-A", path.join(root, "sys-a.sqlite3"));
     const sysBConfig = bridgeConfig("SYS-B", path.join(root, "sys-b.sqlite3"));
     const sysAService = new AgentBridgeService(sysAConfig, sysADatabase);

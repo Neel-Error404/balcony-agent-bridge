@@ -129,6 +129,19 @@ export class AutonomousConsultationCoordinator {
   ): Promise<boolean> {
     let run: ConsultationRun;
     try {
+      const resourceId = claim.envelope.payload.project;
+      if (
+        !resourceId ||
+        !claim.authenticatedIngress ||
+        !this.database.isPeerAuthorizedForResource(
+          claim.envelope.origin_system,
+          resourceId,
+        )
+      ) {
+        throw new DispatchRejectedError(
+          "The requested resource is not authorized for this peer.",
+        );
+      }
       run = this.ensureRun(claim.envelope, now);
     } catch (error) {
       if (error instanceof DispatchRejectedError) {
