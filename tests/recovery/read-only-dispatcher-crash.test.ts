@@ -183,7 +183,7 @@ describe("read-only dispatcher crash recovery", () => {
     expect(database.getStatus().outbox.pending).toBe(1);
   });
 
-  it("rechecks a revoked resource grant when an expired claim is recovered", async () => {
+  it("parks a recovered claim when its persistent resource grant was revoked", async () => {
     temporaryDirectory = fs.mkdtempSync(
       path.join(os.tmpdir(), "balcony-dispatcher-revocation-"),
     );
@@ -229,8 +229,16 @@ describe("read-only dispatcher crash recovery", () => {
       await dispatcher.runOnce(new Date(start.getTime() + 31_000)),
     ).toBe(1);
     expect(executor.inputs).toHaveLength(0);
-    expect(database.getStatus().inbox.rejected).toBe(1);
-    expect(database.getStatus().outbox.pending).toBe(1);
+    expect(database.getStatus().inbox.quarantined).toBe(1);
+    expect(database.getStatus().outbox.pending).toBe(0);
+    expect(database.listAuthorizationRequests()).toEqual([
+      expect.objectContaining({
+        requestId: original.message_id,
+        peerSystemId: "SYS-A",
+        resourceId: "voiceai",
+        state: "pending",
+      }),
+    ]);
   });
 
   it("rejects with a fresh failure result when the prior result is quarantined", async () => {

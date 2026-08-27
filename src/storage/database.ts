@@ -26,6 +26,12 @@ import {
   IdempotencyConflictError,
   StateTransitionError,
 } from "../errors.js";
+import {
+  AuthorizationAuditEventSchema,
+  AuthorizationRequestStateSchema,
+  type AuthorizationAuditEvent as AuthorizationAuditEventName,
+  type AuthorizationRequestState,
+} from "../contracts/approval.js";
 import { normalizeErrorCode, safeErrorCode } from "../security/sanitize-error.js";
 
 export type OutboxState =
@@ -41,7 +47,7 @@ export type InboxState =
   | "rejected"
   | "quarantined";
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 interface OutboxRow {
   message_id: string;
@@ -61,6 +67,34 @@ interface InboxRow {
   claim_token_hash: string | null;
   claim_until_utc: string | null;
   authenticated_ingress?: number;
+}
+
+interface AuthorizationRequestRow {
+  request_id: string;
+  request_identity: string;
+  request_fingerprint: string;
+  peer_system_id: string;
+  resource_id: string;
+  state: AuthorizationRequestState;
+  requested_at_utc: string;
+  decided_at_utc: string | null;
+  decided_by: string | null;
+  temporary_expires_at_utc: string | null;
+  consumed_at_utc: string | null;
+  reason: string | null;
+  updated_at_utc: string;
+}
+
+interface AuthorizationAuditRow {
+  event_id: string;
+  request_id: string;
+  event: AuthorizationAuditEventName;
+  state: AuthorizationRequestState;
+  actor_id: string;
+  peer_system_id: string;
+  resource_id: string;
+  occurred_at_utc: string;
+  reason: string | null;
 }
 
 export interface EnqueueResult {
@@ -112,6 +146,44 @@ export interface PeerResourceGrant {
   grantedAtUtc: string;
   revokedAtUtc?: string;
 }
+
+export interface AuthorizationRequest {
+  requestId: string;
+  requestFingerprint: string;
+  peerSystemId: SystemId;
+  resourceId: string;
+  state: AuthorizationRequestState;
+  requestedAtUtc: string;
+  temporaryExpiresAtUtc?: string;
+  reason?: string;
+}
+
+export interface AuthorizationAuditRecord {
+  eventId: string;
+  requestId: string;
+  event: AuthorizationAuditEventName;
+  state: AuthorizationRequestState;
+  actorId: SystemId;
+  peerSystemId: SystemId;
+  resourceId: string;
+  occurredAtUtc: string;
+  reason?: string;
+}
+
+export type ResourceAccessDecision =
+  | {
+      status: "authorized";
+      basis:
+        | "persistent_grant"
+        | "temporary_approval"
+        | "approve_once"
+        | "same_request_recovery";
+      approvalRequestId?: string;
+    }
+  | {
+      status: "approval_pending" | "duplicate" | "denied";
+      approvalRequestId?: string;
+    };
 
 export interface InboxListItem {
   envelope: BridgeEnvelope;
@@ -573,25 +645,68 @@ export class BridgeDatabase {
     peerSystemIdValue: string,
     resourceIdValue: string,
     now = new Date(),
+    actorIdValue = "local-operator",
   ): PeerResourceGrant {
     const peerSystemId = SystemIdSchema.parse(peerSystemIdValue);
     const resourceId = ResourceIdSchema.parse(resourceIdValue);
-    const existing = this.getPeerResourceGrant(peerSystemId, resourceId);
-    if (!existing) {
-      throw new StateTransitionError(
-        `Grant for peer '${peerSystemId}' and resource '${resourceId}' does not exist`,
-      );
-    }
-    if (existing.state === "active") {
-      this.database
+    const actorId = SystemIdSchema.parse(actorIdValue);
+    const nowUtc = now.toISOString();
+    const transaction = this.database.transaction(() => {
+      const existing = this.getPeerResourceGrant(peerSystemId, resourceId);
+      if (!existing) {
+        throw new StateTransitionError(
+          `Grant for peer '${peerSystemId}' and resource '${resourceId}' does not exist`,
+        );
+      }
+      if (existing.state === "active") {
+        this.database
+          .prepare(
+            `UPDATE peer_resource_grants
+             SET state = 'revoked', revoked_at_utc = ?
+             WHERE peer_system_id = ? AND resource_id = ?`,
+          )
+          .run(nowUtc, peerSystemId, resourceId);
+      }
+
+      const temporaryApprovals = this.database
         .prepare(
-          `UPDATE peer_resource_grants
-           SET state = 'revoked', revoked_at_utc = ?
-           WHERE peer_system_id = ? AND resource_id = ?`,
+          `SELECT request_id, request_identity, request_fingerprint,
+                  peer_system_id, resource_id, state, requested_at_utc,
+                  decided_at_utc, decided_by, temporary_expires_at_utc,
+                  consumed_at_utc, reason, updated_at_utc
+           FROM authorization_requests
+           WHERE peer_system_id = ? AND resource_id = ?
+             AND state = 'approved_temporary'`,
         )
-        .run(now.toISOString(), peerSystemId, resourceId);
-    }
-    return this.getPeerResourceGrant(peerSystemId, resourceId)!;
+        .all(peerSystemId, resourceId) as AuthorizationRequestRow[];
+      for (const approval of temporaryApprovals) {
+        const updated = this.database
+          .prepare(
+            `UPDATE authorization_requests
+             SET state = 'revoked', decided_at_utc = ?, decided_by = ?,
+                 reason = 'persistent-grant-revoked', updated_at_utc = ?
+             WHERE request_id = ? AND state = 'approved_temporary'`,
+          )
+          .run(nowUtc, actorId, nowUtc, approval.request_id);
+        if (updated.changes !== 1) {
+          throw new StateTransitionError(
+            "Temporary authorization changed concurrently",
+          );
+        }
+        this.insertAuthorizationAudit({
+          requestId: approval.request_id,
+          event: "revoked",
+          state: "revoked",
+          actorId,
+          peerSystemId,
+          resourceId,
+          occurredAtUtc: nowUtc,
+          reason: "persistent-grant-revoked",
+        });
+      }
+      return this.getPeerResourceGrant(peerSystemId, resourceId)!;
+    });
+    return transaction.immediate();
   }
 
   public isPeerAuthorizedForResource(
@@ -618,6 +733,643 @@ export class BridgeDatabase {
         )
         .get(peerSystemId.data, resourceId.data),
     );
+  }
+
+  public authorizeClaimedResourceAccess(input: {
+    requestMessageId: string;
+    consumerId: string;
+    claimToken: string;
+    resourceId: string;
+    actorId: string;
+    now?: Date;
+  }): ResourceAccessDecision {
+    assertNonEmpty(input.requestMessageId, "requestMessageId");
+    assertNonEmpty(input.consumerId, "consumerId");
+    assertNonEmpty(input.claimToken, "claimToken");
+    const resourceIdResult = ResourceIdSchema.safeParse(input.resourceId);
+    const actorId = SystemIdSchema.parse(input.actorId);
+    const now = input.now ?? new Date();
+    const nowUtc = now.toISOString();
+
+    const transaction = this.database.transaction((): ResourceAccessDecision => {
+      this.expireAuthorizationRequests(now);
+      const row = this.database
+        .prepare(
+          `SELECT message_id, envelope_json, payload_sha256, state,
+                  claim_owner, claim_token_hash, claim_until_utc,
+                  authenticated_ingress
+           FROM inbox
+           WHERE message_id = ?`,
+        )
+        .get(input.requestMessageId) as InboxRow | undefined;
+      if (
+        !row ||
+        row.state !== "claimed" ||
+        row.claim_owner !== input.consumerId ||
+        row.claim_token_hash !== hashToken(input.claimToken) ||
+        !row.claim_until_utc ||
+        row.claim_until_utc <= nowUtc
+      ) {
+        throw new StateTransitionError(
+          `Claim for inbox message '${input.requestMessageId}' is invalid or expired`,
+        );
+      }
+
+      const envelope = parseEnvelope(JSON.parse(row.envelope_json));
+      if (
+        row.authenticated_ingress !== 1 ||
+        !resourceIdResult.success
+      ) {
+        return { status: "denied" };
+      }
+      const resourceId = resourceIdResult.data;
+      if (envelope.payload.project !== resourceId) {
+        return { status: "denied" };
+      }
+      const peerSystemId = SystemIdSchema.safeParse(envelope.origin_system);
+      if (!peerSystemId.success) {
+        return { status: "denied" };
+      }
+      const resource = this.getResource(resourceId);
+      if (!resource?.enabled) {
+        return { status: "denied" };
+      }
+      if (this.isPeerAuthorizedForResource(peerSystemId.data, resourceId)) {
+        return { status: "authorized", basis: "persistent_grant" };
+      }
+
+      const temporary = this.database
+        .prepare(
+          `SELECT request_id
+           FROM authorization_requests
+           WHERE peer_system_id = ?
+             AND resource_id = ?
+             AND state = 'approved_temporary'
+             AND temporary_expires_at_utc > ?
+           ORDER BY temporary_expires_at_utc DESC, request_id
+           LIMIT 1`,
+        )
+        .get(peerSystemId.data, resourceId, nowUtc) as
+        | { request_id: string }
+        | undefined;
+      if (temporary) {
+        this.insertAuthorizationAudit({
+          requestId: temporary.request_id,
+          event: "temporary_used",
+          state: "approved_temporary",
+          actorId,
+          peerSystemId: peerSystemId.data,
+          resourceId,
+          occurredAtUtc: nowUtc,
+        });
+        return {
+          status: "authorized",
+          basis: "temporary_approval",
+          approvalRequestId: temporary.request_id,
+        };
+      }
+
+      const requestIdentity = hashAuthorizationValue([
+        peerSystemId.data,
+        resourceId,
+        envelope.kind,
+        envelope.stream_id,
+        envelope.idempotency_key,
+      ]);
+      const requestFingerprint = hashAuthorizationValue([
+        requestIdentity,
+        row.payload_sha256,
+      ]);
+      const existing = this.getAuthorizationRequestRowByIdentity(requestIdentity);
+      if (existing && existing.request_id !== input.requestMessageId) {
+        return {
+          status: "duplicate",
+          approvalRequestId: existing.request_id,
+        };
+      }
+      if (existing) {
+        if (existing.request_fingerprint !== requestFingerprint) {
+          return {
+            status: "duplicate",
+            approvalRequestId: existing.request_id,
+          };
+        }
+        switch (existing.state) {
+          case "pending":
+            this.parkClaimForApproval(input, nowUtc);
+            return {
+              status: "approval_pending",
+              approvalRequestId: existing.request_id,
+            };
+          case "approved_once":
+            this.database
+              .prepare(
+                `UPDATE authorization_requests
+                 SET state = 'consumed', consumed_at_utc = ?, updated_at_utc = ?
+                 WHERE request_id = ? AND state = 'approved_once'`,
+              )
+              .run(nowUtc, nowUtc, existing.request_id);
+            this.insertAuthorizationAudit({
+              requestId: existing.request_id,
+              event: "consumed",
+              state: "consumed",
+              actorId,
+              peerSystemId: peerSystemId.data,
+              resourceId,
+              occurredAtUtc: nowUtc,
+            });
+            return {
+              status: "authorized",
+              basis: "approve_once",
+              approvalRequestId: existing.request_id,
+            };
+          case "consumed":
+            return this.database
+              .prepare(
+                `SELECT 1 FROM consultation_runs
+                 WHERE request_message_id = ?`,
+              )
+              .get(existing.request_id)
+              ? {
+                  status: "authorized",
+                  basis: "same_request_recovery",
+                  approvalRequestId: existing.request_id,
+                }
+              : {
+                  status: "denied",
+                  approvalRequestId: existing.request_id,
+                };
+          case "approved_temporary":
+            return existing.temporary_expires_at_utc &&
+              existing.temporary_expires_at_utc > nowUtc
+              ? {
+                  status: "authorized",
+                  basis: "temporary_approval",
+                  approvalRequestId: existing.request_id,
+                }
+              : { status: "denied", approvalRequestId: existing.request_id };
+          case "denied":
+          case "revoked":
+          case "expired":
+            return { status: "denied", approvalRequestId: existing.request_id };
+        }
+      }
+
+      this.database
+        .prepare(
+          `INSERT INTO authorization_requests (
+             request_id, request_identity, request_fingerprint,
+             peer_system_id, resource_id, state, requested_at_utc,
+             decided_at_utc, decided_by, temporary_expires_at_utc,
+             consumed_at_utc, reason, updated_at_utc
+           ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, NULL, NULL, ?)`,
+        )
+        .run(
+          input.requestMessageId,
+          requestIdentity,
+          requestFingerprint,
+          peerSystemId.data,
+          resourceId,
+          nowUtc,
+          nowUtc,
+        );
+      this.insertAuthorizationAudit({
+        requestId: input.requestMessageId,
+        event: "requested",
+        state: "pending",
+        actorId,
+        peerSystemId: peerSystemId.data,
+        resourceId,
+        occurredAtUtc: nowUtc,
+      });
+      this.parkClaimForApproval(input, nowUtc);
+      return {
+        status: "approval_pending",
+        approvalRequestId: input.requestMessageId,
+      };
+    });
+    return transaction.immediate();
+  }
+
+  public listAuthorizationRequests(input: {
+    state?: AuthorizationRequestState;
+    now?: Date;
+  } = {}): AuthorizationRequest[] {
+    const now = input.now ?? new Date();
+    this.expireAuthorizationRequests(now);
+    const state = input.state === undefined
+      ? undefined
+      : AuthorizationRequestStateSchema.parse(input.state);
+    const rows = this.database
+      .prepare(
+        `SELECT request_id, request_identity, request_fingerprint,
+                peer_system_id, resource_id, state, requested_at_utc,
+                decided_at_utc, decided_by, temporary_expires_at_utc,
+                consumed_at_utc, reason, updated_at_utc
+         FROM authorization_requests
+         ${state === undefined ? "" : "WHERE state = ?"}
+         ORDER BY requested_at_utc, request_id`,
+      )
+      .all(...(state === undefined ? [] : [state])) as AuthorizationRequestRow[];
+    return rows.map((row) => this.mapAuthorizationRequest(row));
+  }
+
+  public getAuthorizationRequest(
+    requestId: string,
+    now = new Date(),
+  ): AuthorizationRequest | undefined {
+    assertNonEmpty(requestId, "requestId");
+    this.expireAuthorizationRequests(now);
+    const row = this.getAuthorizationRequestRow(requestId);
+    return row ? this.mapAuthorizationRequest(row) : undefined;
+  }
+
+  public approveAuthorizationRequestOnce(input: {
+    requestId: string;
+    actorId: string;
+    now?: Date;
+  }): AuthorizationRequest {
+    return this.decideAuthorizationRequest({
+      ...input,
+      state: "approved_once",
+      event: "approved_once",
+    });
+  }
+
+  public approveAuthorizationRequestTemporary(input: {
+    requestId: string;
+    actorId: string;
+    expiresAtUtc: string;
+    now?: Date;
+  }): AuthorizationRequest {
+    const now = input.now ?? new Date();
+    const expiresAt = parseUtcInstant(input.expiresAtUtc, "expiresAtUtc");
+    if (expiresAt.getTime() <= now.getTime()) {
+      throw new StateTransitionError(
+        "Temporary approval expiry must be later than the decision time",
+      );
+    }
+    return this.decideAuthorizationRequest({
+      requestId: input.requestId,
+      actorId: input.actorId,
+      now,
+      state: "approved_temporary",
+      event: "approved_temporary",
+      temporaryExpiresAtUtc: expiresAt.toISOString(),
+    });
+  }
+
+  public denyAuthorizationRequest(input: {
+    requestId: string;
+    actorId: string;
+    reason?: string;
+    now?: Date;
+  }): AuthorizationRequest {
+    const reason = parseAuthorizationReason(input.reason);
+    return this.decideAuthorizationRequest({
+      requestId: input.requestId,
+      actorId: input.actorId,
+      ...(input.now ? { now: input.now } : {}),
+      state: "denied",
+      event: "denied",
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  public revokeAuthorizationRequest(input: {
+    requestId: string;
+    actorId: string;
+    reason?: string;
+    now?: Date;
+  }): AuthorizationRequest {
+    assertNonEmpty(input.requestId, "requestId");
+    const actorId = SystemIdSchema.parse(input.actorId);
+    const now = input.now ?? new Date();
+    const nowUtc = now.toISOString();
+    const reason = parseAuthorizationReason(input.reason);
+    const transaction = this.database.transaction(() => {
+      this.expireAuthorizationRequests(now);
+      const row = this.getAuthorizationRequestRow(input.requestId);
+      if (!row) {
+        throw new StateTransitionError("Authorization request does not exist");
+      }
+      if (row.state === "revoked") {
+        return this.mapAuthorizationRequest(row);
+      }
+      if (row.state !== "approved_once" && row.state !== "approved_temporary") {
+        throw new StateTransitionError(
+          "Only an active approval can be revoked",
+        );
+      }
+      const result = this.database
+        .prepare(
+          `UPDATE authorization_requests
+           SET state = 'revoked', decided_at_utc = ?, decided_by = ?,
+               reason = ?, updated_at_utc = ?
+           WHERE request_id = ? AND state = ?`,
+        )
+        .run(nowUtc, actorId, reason ?? null, nowUtc, input.requestId, row.state);
+      if (result.changes !== 1) {
+        throw new StateTransitionError("Authorization request changed concurrently");
+      }
+      this.insertAuthorizationAudit({
+        requestId: row.request_id,
+        event: "revoked",
+        state: "revoked",
+        actorId,
+        peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+        resourceId: ResourceIdSchema.parse(row.resource_id),
+        occurredAtUtc: nowUtc,
+        ...(reason ? { reason } : {}),
+      });
+      this.requeueAuthorizationRequest(row.request_id);
+      return this.mapAuthorizationRequest(
+        this.getAuthorizationRequestRow(row.request_id)!,
+      );
+    });
+    return transaction.immediate();
+  }
+
+  public listAuthorizationAudit(input: {
+    requestId?: string;
+    peerSystemId?: string;
+    resourceId?: string;
+  } = {}): AuthorizationAuditRecord[] {
+    const filters: string[] = [];
+    const parameters: string[] = [];
+    if (input.requestId !== undefined) {
+      assertNonEmpty(input.requestId, "requestId");
+      filters.push("request_id = ?");
+      parameters.push(input.requestId);
+    }
+    if (input.peerSystemId !== undefined) {
+      filters.push("peer_system_id = ?");
+      parameters.push(SystemIdSchema.parse(input.peerSystemId));
+    }
+    if (input.resourceId !== undefined) {
+      filters.push("resource_id = ?");
+      parameters.push(ResourceIdSchema.parse(input.resourceId));
+    }
+    const rows = this.database
+      .prepare(
+        `SELECT event_id, request_id, event, state, actor_id,
+                peer_system_id, resource_id, occurred_at_utc, reason
+         FROM authorization_audit
+         ${filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`}
+         ORDER BY occurred_at_utc, rowid`,
+      )
+      .all(...parameters) as AuthorizationAuditRow[];
+    return rows.map((row) => ({
+      eventId: row.event_id,
+      requestId: row.request_id,
+      event: AuthorizationAuditEventSchema.parse(row.event),
+      state: AuthorizationRequestStateSchema.parse(row.state),
+      actorId: SystemIdSchema.parse(row.actor_id),
+      peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+      resourceId: ResourceIdSchema.parse(row.resource_id),
+      occurredAtUtc: row.occurred_at_utc,
+      ...(row.reason ? { reason: row.reason } : {}),
+    }));
+  }
+
+  private decideAuthorizationRequest(input: {
+    requestId: string;
+    actorId: string;
+    state: "approved_once" | "approved_temporary" | "denied";
+    event: "approved_once" | "approved_temporary" | "denied";
+    temporaryExpiresAtUtc?: string;
+    reason?: string;
+    now?: Date;
+  }): AuthorizationRequest {
+    assertNonEmpty(input.requestId, "requestId");
+    const actorId = SystemIdSchema.parse(input.actorId);
+    const now = input.now ?? new Date();
+    const nowUtc = now.toISOString();
+    const transaction = this.database.transaction(() => {
+      this.expireAuthorizationRequests(now);
+      const row = this.getAuthorizationRequestRow(input.requestId);
+      if (!row) {
+        throw new StateTransitionError("Authorization request does not exist");
+      }
+      if (row.state === input.state) {
+        return this.mapAuthorizationRequest(row);
+      }
+      if (row.state !== "pending") {
+        throw new StateTransitionError(
+          "Only a pending authorization request can be decided",
+        );
+      }
+      const resource = this.getResource(row.resource_id);
+      if (!resource?.enabled) {
+        throw new StateTransitionError(
+          "Authorization request resource is unavailable",
+        );
+      }
+      if (
+        input.state !== "denied" &&
+        this.isPeerAuthorizedForResource(row.peer_system_id, row.resource_id)
+      ) {
+        throw new StateTransitionError(
+          "Authorization request already has a persistent grant",
+        );
+      }
+      const result = this.database
+        .prepare(
+          `UPDATE authorization_requests
+           SET state = ?, decided_at_utc = ?, decided_by = ?,
+               temporary_expires_at_utc = ?, reason = ?, updated_at_utc = ?
+           WHERE request_id = ? AND state = 'pending'`,
+        )
+        .run(
+          input.state,
+          nowUtc,
+          actorId,
+          input.temporaryExpiresAtUtc ?? null,
+          input.reason ?? null,
+          nowUtc,
+          row.request_id,
+        );
+      if (result.changes !== 1) {
+        throw new StateTransitionError("Authorization request changed concurrently");
+      }
+      this.insertAuthorizationAudit({
+        requestId: row.request_id,
+        event: input.event,
+        state: input.state,
+        actorId,
+        peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+        resourceId: ResourceIdSchema.parse(row.resource_id),
+        occurredAtUtc: nowUtc,
+        ...(input.reason ? { reason: input.reason } : {}),
+      });
+      this.requeueAuthorizationRequest(row.request_id);
+      return this.mapAuthorizationRequest(
+        this.getAuthorizationRequestRow(row.request_id)!,
+      );
+    });
+    return transaction.immediate();
+  }
+
+  private expireAuthorizationRequests(now: Date): void {
+    const nowUtc = now.toISOString();
+    const expire = (): void => {
+      const rows = this.database
+        .prepare(
+          `SELECT request_id, request_identity, request_fingerprint,
+                  peer_system_id, resource_id, state, requested_at_utc,
+                  decided_at_utc, decided_by, temporary_expires_at_utc,
+                  consumed_at_utc, reason, updated_at_utc
+           FROM authorization_requests
+           WHERE state = 'approved_temporary'
+             AND temporary_expires_at_utc <= ?
+           ORDER BY request_id`,
+        )
+        .all(nowUtc) as AuthorizationRequestRow[];
+      for (const row of rows) {
+        const result = this.database
+          .prepare(
+            `UPDATE authorization_requests
+             SET state = 'expired', updated_at_utc = ?
+             WHERE request_id = ?
+               AND state = 'approved_temporary'
+               AND temporary_expires_at_utc <= ?`,
+          )
+          .run(nowUtc, row.request_id, nowUtc);
+        if (result.changes !== 1) {
+          continue;
+        }
+        this.insertAuthorizationAudit({
+          requestId: row.request_id,
+          event: "expired",
+          state: "expired",
+          actorId: SystemIdSchema.parse(row.decided_by ?? row.peer_system_id),
+          peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+          resourceId: ResourceIdSchema.parse(row.resource_id),
+          occurredAtUtc: nowUtc,
+        });
+      }
+    };
+    if (this.database.inTransaction) {
+      expire();
+    } else {
+      this.database.transaction(expire).immediate();
+    }
+  }
+
+  private parkClaimForApproval(
+    input: {
+      requestMessageId: string;
+      consumerId: string;
+      claimToken: string;
+    },
+    nowUtc: string,
+  ): void {
+    const result = this.database
+      .prepare(
+        `UPDATE inbox
+         SET state = 'quarantined', claim_owner = NULL,
+             claim_token_hash = NULL, claim_until_utc = NULL,
+             last_error = 'Authorization approval pending'
+         WHERE message_id = ? AND state = 'claimed'
+           AND claim_owner = ? AND claim_token_hash = ?
+           AND claim_until_utc > ?`,
+      )
+      .run(
+        input.requestMessageId,
+        input.consumerId,
+        hashToken(input.claimToken),
+        nowUtc,
+      );
+    if (result.changes !== 1) {
+      throw new StateTransitionError(
+        `Claim for inbox message '${input.requestMessageId}' is invalid or expired`,
+      );
+    }
+  }
+
+  private requeueAuthorizationRequest(requestId: string): void {
+    this.database
+      .prepare(
+        `UPDATE inbox
+         SET state = 'available', claim_owner = NULL,
+             claim_token_hash = NULL, claim_until_utc = NULL,
+             last_error = NULL
+         WHERE message_id = ? AND state = 'quarantined'`,
+      )
+      .run(requestId);
+  }
+
+  private getAuthorizationRequestRow(
+    requestId: string,
+  ): AuthorizationRequestRow | undefined {
+    return this.database
+      .prepare(
+        `SELECT request_id, request_identity, request_fingerprint,
+                peer_system_id, resource_id, state, requested_at_utc,
+                decided_at_utc, decided_by, temporary_expires_at_utc,
+                consumed_at_utc, reason, updated_at_utc
+         FROM authorization_requests WHERE request_id = ?`,
+      )
+      .get(requestId) as AuthorizationRequestRow | undefined;
+  }
+
+  private getAuthorizationRequestRowByIdentity(
+    requestIdentity: string,
+  ): AuthorizationRequestRow | undefined {
+    return this.database
+      .prepare(
+        `SELECT request_id, request_identity, request_fingerprint,
+                peer_system_id, resource_id, state, requested_at_utc,
+                decided_at_utc, decided_by, temporary_expires_at_utc,
+                consumed_at_utc, reason, updated_at_utc
+         FROM authorization_requests WHERE request_identity = ?`,
+      )
+      .get(requestIdentity) as AuthorizationRequestRow | undefined;
+  }
+
+  private mapAuthorizationRequest(row: AuthorizationRequestRow): AuthorizationRequest {
+    return {
+      requestId: row.request_id,
+      requestFingerprint: row.request_fingerprint,
+      peerSystemId: SystemIdSchema.parse(row.peer_system_id),
+      resourceId: ResourceIdSchema.parse(row.resource_id),
+      state: AuthorizationRequestStateSchema.parse(row.state),
+      requestedAtUtc: row.requested_at_utc,
+      ...(row.temporary_expires_at_utc
+        ? { temporaryExpiresAtUtc: row.temporary_expires_at_utc }
+        : {}),
+      ...(row.reason ? { reason: row.reason } : {}),
+    };
+  }
+
+  private insertAuthorizationAudit(input: {
+    requestId: string;
+    event: AuthorizationAuditEventName;
+    state: AuthorizationRequestState;
+    actorId: SystemId;
+    peerSystemId: SystemId;
+    resourceId: string;
+    occurredAtUtc: string;
+    reason?: string;
+  }): void {
+    this.database
+      .prepare(
+        `INSERT INTO authorization_audit (
+           event_id, request_id, event, state, actor_id,
+           peer_system_id, resource_id, occurred_at_utc, reason
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        input.requestId,
+        input.event,
+        input.state,
+        input.actorId,
+        input.peerSystemId,
+        input.resourceId,
+        input.occurredAtUtc,
+        input.reason ?? null,
+      );
   }
 
   private getResource(resourceId: string): RegisteredResource | undefined {
@@ -2286,6 +3038,103 @@ export class BridgeDatabase {
       `);
     });
     resourceAuthorizationMigration.immediate();
+
+    const approvalWorkflowMigration = this.database.transaction(() => {
+      const alreadyApplied = this.database
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = 9")
+        .get();
+      if (alreadyApplied) {
+        return;
+      }
+      this.database.exec(`
+        CREATE TABLE authorization_requests (
+          request_id TEXT PRIMARY KEY,
+          request_identity TEXT NOT NULL UNIQUE,
+          request_fingerprint TEXT NOT NULL,
+          peer_system_id TEXT NOT NULL,
+          resource_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'pending', 'approved_once', 'approved_temporary',
+            'denied', 'revoked', 'expired', 'consumed'
+          )),
+          requested_at_utc TEXT NOT NULL,
+          decided_at_utc TEXT,
+          decided_by TEXT,
+          temporary_expires_at_utc TEXT,
+          consumed_at_utc TEXT,
+          reason TEXT,
+          updated_at_utc TEXT NOT NULL,
+          FOREIGN KEY (request_id) REFERENCES inbox(message_id)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+          FOREIGN KEY (resource_id) REFERENCES resources(resource_id)
+            ON UPDATE CASCADE ON DELETE RESTRICT,
+          CHECK (
+            (state = 'pending' AND decided_at_utc IS NULL AND decided_by IS NULL) OR
+            (state <> 'pending' AND decided_at_utc IS NOT NULL AND decided_by IS NOT NULL)
+          ),
+          CHECK (
+            (state = 'approved_temporary' AND temporary_expires_at_utc IS NOT NULL) OR
+            (state <> 'approved_temporary')
+          ),
+          CHECK (
+            (state = 'consumed' AND consumed_at_utc IS NOT NULL) OR
+            (state <> 'consumed')
+          )
+        );
+
+        CREATE INDEX idx_authorization_requests_pair_state
+          ON authorization_requests (
+            peer_system_id, resource_id, state, temporary_expires_at_utc
+          );
+        CREATE INDEX idx_authorization_requests_state_time
+          ON authorization_requests (state, requested_at_utc, request_id);
+
+        CREATE TABLE authorization_audit (
+          event_id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          event TEXT NOT NULL CHECK (event IN (
+            'requested', 'approved_once', 'approved_temporary', 'temporary_used',
+            'denied', 'revoked', 'expired', 'consumed'
+          )),
+          state TEXT NOT NULL CHECK (state IN (
+            'pending', 'approved_once', 'approved_temporary',
+            'denied', 'revoked', 'expired', 'consumed'
+          )),
+          actor_id TEXT NOT NULL,
+          peer_system_id TEXT NOT NULL,
+          resource_id TEXT NOT NULL,
+          occurred_at_utc TEXT NOT NULL,
+          reason TEXT,
+          FOREIGN KEY (request_id) REFERENCES authorization_requests(request_id)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+          FOREIGN KEY (resource_id) REFERENCES resources(resource_id)
+            ON UPDATE CASCADE ON DELETE RESTRICT
+        );
+
+        CREATE INDEX idx_authorization_audit_request_time
+          ON authorization_audit (request_id, occurred_at_utc, event_id);
+        CREATE INDEX idx_authorization_audit_pair_time
+          ON authorization_audit (
+            peer_system_id, resource_id, occurred_at_utc, event_id
+          );
+
+        CREATE TRIGGER authorization_audit_append_only_update
+        BEFORE UPDATE ON authorization_audit
+        BEGIN
+          SELECT RAISE(ABORT, 'authorization audit is append-only');
+        END;
+
+        CREATE TRIGGER authorization_audit_append_only_delete
+        BEFORE DELETE ON authorization_audit
+        BEGIN
+          SELECT RAISE(ABORT, 'authorization audit is append-only');
+        END;
+
+        INSERT INTO schema_migrations (version, applied_at_utc)
+        VALUES (9, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      `);
+    });
+    approvalWorkflowMigration.immediate();
   }
 
   private assertSupportedSchemaVersion(): void {
@@ -2422,6 +3271,41 @@ function sameConversationRoute(
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function hashAuthorizationValue(parts: readonly string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) {
+    hash.update(part, "utf8");
+    hash.update("\0", "utf8");
+  }
+  return hash.digest("hex");
+}
+
+function parseUtcInstant(value: string, name: string): Date {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new StateTransitionError(`${name} must be a canonical UTC timestamp`);
+  }
+  return parsed;
+}
+
+function parseAuthorizationReason(value?: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 200) {
+    throw new StateTransitionError(
+      "Authorization reason must contain between 1 and 200 characters",
+    );
+  }
+  if (/\r|\n/.test(normalized)) {
+    throw new StateTransitionError(
+      "Authorization reason must be a single line",
+    );
+  }
+  return normalized;
 }
 
 function addSeconds(date: Date, seconds: number): Date {

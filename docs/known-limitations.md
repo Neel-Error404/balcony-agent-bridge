@@ -26,11 +26,17 @@ the smaller static design.
 - `doctor --check-transport` proves only that a sender link can be opened. A
   real peer is required for end-to-end delivery validation.
 - Upgrade and rollback are operator-run. Database migrations are forward-only,
-  downgrade after schema-v8 resource authorization is unsupported, and there
-  is no automatic package updater. Schema v6 quarantines pending legacy inbox
+  downgrade after schema-v8 resource authorization or schema-v9 local approval
+  is unsupported, and there is no automatic package updater. Schema v6 quarantines pending legacy inbox
   work; schema v7 marks all remaining legacy inbox rows as unauthenticated, and
   schema v8 creates empty resource/grant tables so existing peers receive no
-  implicit project access.
+  implicit project access. Schema v9 preserves those persistent grants but adds
+  empty local approval and append-only metadata-audit tables, so it also grants
+  no one-time or temporary access implicitly.
+- Approval is a local SQLite/operator workflow, not remote approval, a wire or
+  MCP protocol extension, or a live-service control plane. Its protection is
+  the local OS/process identity boundary; signer key IDs are not retained as a
+  separate inbox audit field.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
   it is not evidence from a separate clean OS/VM. Version `0.1.0` is the
   approved public alpha package and GitHub release target, not a

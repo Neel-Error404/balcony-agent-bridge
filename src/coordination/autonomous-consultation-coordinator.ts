@@ -130,14 +130,23 @@ export class AutonomousConsultationCoordinator {
     let run: ConsultationRun;
     try {
       const resourceId = claim.envelope.payload.project;
-      if (
-        !resourceId ||
-        !claim.authenticatedIngress ||
-        !this.database.isPeerAuthorizedForResource(
-          claim.envelope.origin_system,
-          resourceId,
-        )
-      ) {
+      if (!resourceId) {
+        throw new DispatchRejectedError(
+          "The requested resource is not authorized for this peer.",
+        );
+      }
+      const authorization = this.database.authorizeClaimedResourceAccess({
+        requestMessageId: claim.envelope.message_id,
+        consumerId: this.consumerId,
+        claimToken: claim.claimToken,
+        resourceId,
+        actorId: this.systemId,
+        now,
+      });
+      if (authorization.status === "approval_pending") {
+        return false;
+      }
+      if (authorization.status !== "authorized") {
         throw new DispatchRejectedError(
           "The requested resource is not authorized for this peer.",
         );
@@ -632,9 +641,6 @@ export class AutonomousConsultationCoordinator {
         ),
         body:
           "The bounded consultation stopped at a configured project or evidence boundary.",
-        ...(claim.envelope.payload.project
-          ? { project: claim.envelope.payload.project }
-          : {}),
         evidence: [],
         coordination_result: {
           protocol_version: "1.0",

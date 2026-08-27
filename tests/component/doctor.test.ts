@@ -110,7 +110,7 @@ describe("bridge doctor", () => {
     try {
       database
         .prepare(
-          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (9, ?)",
+          "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (10, ?)",
         )
         .run("2026-08-25T00:00:00.000Z");
     } finally {

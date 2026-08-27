@@ -200,6 +200,30 @@ Exit: focused deny/grant/revoke tests and the full local verification ladder
 pass, including migration, recovery, signed-boundary, and clean package checks.
 Git delivery, publication, and operational rollout remain owner-gated.
 
+## Phase 2B: Local Approval Workflow
+
+Status: implemented and locally verified on an uncommitted development branch
+on 2026-08-27. It is not part of the published `v0.1.0` npm/GitHub artifact and
+has not been deployed to either operational node.
+
+- Add schema-v9 SQLite approval requests and append-only metadata audit records.
+- Create a pending request only for authenticated claims to known enabled
+  resources with no active exact persistent grant; preserve schema-v8 resources
+  and grants and create no implicit decision during migration.
+- Bind `approve-once` to the original request only, reject ordinary retries and
+  different-message replay, and permit only an already-created durable
+  consultation run to resume its same workflow.
+- Bind temporary approval to the exact peer/resource pair until strict UTC
+  expiry; deny, revoke, and expiry fail closed.
+- Add local `approval list`, `approval show`, `approval approve-once`,
+  `approval approve-temporary`, `approval deny`, `approval revoke`, and
+  `approval audit` operations without changing signed envelopes, MCP tools,
+  Azure transport, or live service state.
+
+Exit: restart, strict-expiry, replay, migration, and multi-connection decision
+tests pass. Git delivery, publication, deployment, and live operation remain
+owner-gated.
+
 ## Deferred Until Demand Is Proven
 
 - hosted discovery or relay services;
