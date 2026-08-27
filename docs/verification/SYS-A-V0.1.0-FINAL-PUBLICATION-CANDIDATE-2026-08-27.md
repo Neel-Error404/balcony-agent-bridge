@@ -1,4 +1,4 @@
-# [SYS-A] v0.1.0 Final Publication Candidate - 2026-08-27
+# [SYS-A] v0.1.0 Final Publication Evidence - 2026-08-27
 
 ## Decision and evidence boundary
 
@@ -174,19 +174,46 @@ commit pack comparison remains required before publication.
   remain accepted and canonical. This record does not imply that any accepted
   limitation was fixed except where an exact disposition is recorded above.
 
-## Deferred operations
+## Public release outcome
 
-PR #6 was merged as `e4787086b52d741f1b6d3849b0a6f90a6f24d717` after the
-substantive exact-head Codex review of `17a9669a6531533aa0b46ffb0392ebf84f0c37c4`
-reported no major issues and all review threads were resolved. At the time of
-this record, the npm package has not been published or installed from the
-registry, and the `v0.1.0` tag and GitHub Release have not been created. The
-future `v0.1.0` tag must target the final evidence-containing commit (the
-current tagged tree at release creation), so the GitHub source archive retains
-this canonical provenance record. Publication must use the preserved clean
-merged-checkout tarball with SHA-256
-`0789a272c3f7f0b58f094d4d1d47d1d3b884fda984e0ef2b1cee0a62ea946549` above.
-Azure, RBAC, service, and live signed multi-node rollout remain separate and
-deferred.
-Approval remains distinct from completion, and each external operation
-requires separate execution evidence.
+`VERIFIED`: PR #6 merged as
+`e4787086b52d741f1b6d3849b0a6f90a6f24d717` after the substantive exact-head
+Codex review of `17a9669a6531533aa0b46ffb0392ebf84f0c37c4` reported no major
+issues and all review threads were resolved. A clean post-merge pack exposed
+the line-ending reproducibility issue above. Its two test-only corrections and
+this record were independently reviewed, delivered through PR #7, and merged
+as `2fb656dcb09a022d78d18b505f581b14eddae0ae`.
+
+`DEPLOYED / VERIFIED`: npm published `balcony-agent-bridge@0.1.0` publicly at
+2026-08-27T08:50:49Z. Raw registry metadata reports the expected SHA-1 and
+SHA-512 integrity. A disposable empty npm project with an isolated cache then:
+
+- installed exactly version `0.1.0` from the public registry;
+- executed the installed CLI help successfully;
+- executed the installed local three-node demo with `result=passed` and
+  `azure_used=false`;
+- downloaded the registry tarball and reproduced SHA-256
+  `0789a272c3f7f0b58f094d4d1d47d1d3b884fda984e0ef2b1cee0a62ea946549`
+  byte-for-byte against the preserved publication artifact.
+
+`DEPLOYED / VERIFIED`: annotated tag `v0.1.0` has tag-object ID
+`bb95008ffa16b784d88986b773aa1ab01020754b` and peels to the explicitly tested
+release commit `18e45e725a7ad5944e8f68bc2f4aa466dc86e47c`. The GitHub prerelease is
+[Balcony Agent Bridge v0.1.0](https://github.com/Neel-Error404/balcony-agent-bridge/releases/tag/v0.1.0).
+Its attached `balcony-agent-bridge-0.1.0.tgz` is 125,926 bytes; a fresh public
+download reproduced the authoritative SHA-256 byte-for-byte.
+
+`OBSERVED / KNOWN LIMITATION`: Direct tarball publication caused npm's
+public version metadata to retain publisher-local `_resolved` and `_from`
+temporary-path fields. No credential or token is present, and the verified
+tarball contains no machine-local path. Do not use direct local-path tarball
+publication for the next version without first validating registry metadata
+behavior from a disposable neutral staging path.
+
+## Deferred live operations
+
+Phase 1 public release publication is complete. Azure, RBAC, Windows services,
+signing configuration, live databases, and the operational SYS-A/SYS-B bridge
+were not changed. Live signed cutover, per-peer grants, approval workflows, the
+Obsidian adapter, onboarding, third-node deployment, and every Phase B+ feature
+remain separately gated and deferred.
