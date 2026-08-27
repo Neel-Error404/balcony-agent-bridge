@@ -104,17 +104,46 @@ pack comparison must remain byte-identical before publication.
 
 ## Public Publication Outcome
 
-`PENDING`: Publish exactly the frozen tarball as
-`balcony-agent-bridge@0.2.0`, download the registry tarball through a clean
-cache, prove byte identity, and run the documented clean public-registry
-consumer path.
+`DEPLOYED / VERIFIED`: npm published `balcony-agent-bridge@0.2.0` publicly at
+2026-08-27T19:36:04.784Z. The publish command named only the frozen tarball,
+not the source directory. Registry metadata reports the expected SHA-1 and
+SHA-512 integrity. A download through a new empty npm cache reproduced
+SHA-256 `d6c93033342ee7413ad93fd36feb329d9c8abbde55591f7029c3854f6a12ad14`
+and size 139,569 bytes exactly.
+
+A separate empty consumer and empty cache installed exactly version `0.2.0`
+from the public registry and verified:
+
+- CLI help and the resource, grant, and approval command inventory;
+- local demo result `passed` with `azure_used=false`;
+- isolated setup, healthy doctor, and matching status;
+- resource registration/listing and persistent grant create/list/revoke; and
+- empty approval list/audit administration on the newly initialized database.
+
+The package-level clean-consumer verifier had already exercised a seeded
+pending request, approve-once decision, and append-only approval audit against
+the byte-identical frozen artifact. The first public-consumer harness attempt
+correctly failed on an inherited-ACL identity directory. A second attempt
+correctly failed doctor on a malformed test membership shape. After using the
+documented restricted directory and nested key-list membership schema, the
+same public-consumer gate passed. All disposable consumers, caches, databases,
+membership files, and test private identities were moved to the Windows
+Recycle Bin after verification.
 
 ## Tag And GitHub Prerelease Outcome
 
-`PENDING`: Create annotated tag `v0.2.0` at the final package-equivalent tested
-source commit, verify its peeled target, create the GitHub prerelease, attach
-the exact frozen tarball and this record, and verify downloaded asset size and
-digest.
+`DEPLOYED / VERIFIED`: Annotated tag `v0.2.0` has tag-object ID
+`7a5556ccc854be49447b9ae6c81042fc9c687383` and peels locally and remotely to
+the final package-equivalent tested source/evidence commit
+`a6b266232c599d5a67d4e0f1ca3aed2d5577d9c1`.
+
+The GitHub prerelease is
+[Balcony Agent Bridge v0.2.0](https://github.com/Neel-Error404/balcony-agent-bridge/releases/tag/v0.2.0).
+Its attached `balcony-agent-bridge-0.2.0.tgz` is 139,569 bytes; GitHub reports
+SHA-256 `d6c93033342ee7413ad93fd36feb329d9c8abbde55591f7029c3854f6a12ad14`,
+and a fresh release download reproduced that digest. The canonical evidence
+asset is this repository file, uploaded again after its final evidence-only
+merge so the attached copy matches the concluded record.
 
 ## Accepted Residuals And Deferred Operations
 
@@ -122,6 +151,10 @@ digest.
   request fingerprint, but not the verified signing key ID.
 - Local OS access plus exact `BALCONY_SYSTEM_ID` remains the approval-operator
   trust boundary; no web or MCP administration surface was added.
+- npm's public metadata records `_from` as the relative tarball filename but
+  `_resolved` as the publisher-local absolute Windows artifact path. The path
+  contains no credential or token and is absent from the verified tarball, but
+  it is an accepted privacy residual of npm's direct-tarball publication flow.
 - Local clean-consumer verification is not a separate clean operating-system
   image and is not live signed two-node acceptance.
 - Deployment and Phase 3 remain deferred. No live infrastructure or
