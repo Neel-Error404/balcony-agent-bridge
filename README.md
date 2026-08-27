@@ -37,12 +37,18 @@ npm install --global balcony-agent-bridge@0.1.0
 balcony-agent-bridge --help
 ```
 
-From a source checkout:
+Source installation is available only after GitHub exposes the `v0.1.0` release
+tag. Fetch tags, stop clearly if that tag is unavailable, then check out the
+reviewed tag detached before installing dependencies:
 
 ```powershell
 git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
 Set-Location balcony-agent-bridge
-git checkout v0.1.0
+git fetch --tags --force
+if (-not (git tag --list v0.1.0)) {
+  throw "GitHub has not exposed the v0.1.0 release tag; source installation is unavailable."
+}
+git checkout --detach v0.1.0
 npm ci
 npm run build
 $bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
