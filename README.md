@@ -45,6 +45,9 @@ reviewed tag detached before installing dependencies:
 git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
 Set-Location balcony-agent-bridge
 git fetch --tags --force
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to fetch GitHub release tags; source installation is unavailable."
+}
 if (-not (git tag --list v0.1.0)) {
   throw "GitHub has not exposed the v0.1.0 release tag; source installation is unavailable."
 }
