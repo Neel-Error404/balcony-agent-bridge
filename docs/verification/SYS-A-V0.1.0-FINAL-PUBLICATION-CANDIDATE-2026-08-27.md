@@ -2,10 +2,12 @@
 
 ## Decision and evidence boundary
 
-`OBSERVED / TESTED`: The final local publication candidate is source commit
-`9458a50afeb28fb3f759de53f3889380af983e90` on branch
-`codex/release-v0.1.0`. The checkout started clean, and the complete ordered
-release ladder below passed on that exact source.
+`OBSERVED / TESTED`: The final merged publication base is merge commit
+`e4787086b52d741f1b6d3849b0a6f90a6f24d717` on `main`. The final release tree
+adds only the two clean-checkout test-harness corrections described below and
+this canonical package-excluded record. The complete ordered release ladder
+passed against that final tree; the eventual `v0.1.0` tag resolves its exact
+commit identity without changing product or npm-package inputs.
 
 This record supersedes the package identity in the earlier
 [release-candidate record](./SYS-A-V0.1.0-RELEASE-CANDIDATE-2026-08-27.md).
@@ -15,9 +17,14 @@ The former source/artifact pairs
 `7c233360496399be4b54ca70e3b2e0e0145c09b4` /
 `cfdf35053b9ee142f8ca46476cee2a0b0d2d2b007f4fd8d1cd8ddd9a64594d3a`, and
 `ce9fed3c05aa046e4b5bc4853c3169e929ea7fc9` /
-`de7544bd582d816192635894a0da6514350ed46d166e1ace48cb3e3ea97fee7d`
+`de7544bd582d816192635894a0da6514350ed46d166e1ace48cb3e3ea97fee7d`, and
+`9458a50afeb28fb3f759de53f3889380af983e90` /
+`5cde6070b07ec7b8ca40d0960ac5f40ba8d9eabbf43fa2119a4397a1ae224e09`
 remain historical evidence but are superseded and are not the publication
-candidate.
+candidate. The last pair was produced from a filtered Windows working tree
+whose mixed CRLF/LF bytes Git treated as clean. Two independent clean
+checkouts of the merged Git tree instead produced the identical canonical
+artifact recorded below.
 
 This is a sanitized, durable record of source-bound commands, exit status,
 counts, review outcomes, and artifact metadata. Raw session captures remain
@@ -56,7 +63,29 @@ commits, inherited SQLite concurrency diagnosis, and final independent review
 provenance are in the
 [final-head review record](./SYS-A-V0.1.0-FINAL-HEAD-REVIEW-2026-08-27.md).
 
-## Fresh ordered verification on `9458a50`
+## Clean-checkout reproducibility disposition
+
+`OBSERVED / RESOLVED`: The first pack from a clean post-merge worktree did not
+match the earlier `5cde6070...` tarball. Extraction localized the difference to
+line endings in `package.json`, `README.md`, and `SECURITY.md`: the earlier
+artifact contained mixed CRLF/LF working-tree bytes, while the Git blobs
+contained LF and `core.autocrlf=true` materialized consistent CRLF in a clean
+Windows checkout. The same filter normalized the mixed working tree to the LF
+blobs and therefore treated it as clean. No product logic differed.
+
+The clean checkout also exposed two test-harness assumptions:
+
+- the Foundation documentation contract compared LF multiline literals to a
+  CRLF README; its reader now normalizes CRLF to LF before textual assertions;
+- one Integration CLI child exceeded a fixed 10-second harness timeout and
+  returned `status=null`; the isolated test passed on immediate retry, and the
+  harness now allows 30 seconds within a 45-second test budget.
+
+The original failing levels were rerun after their focused corrections:
+Foundation passed 102 tests with 1 explicit skip, and Integration passed 34/34.
+Both changes are test-only and excluded from the npm artifact.
+
+## Fresh ordered verification on the final release tree
 
 Every command ran with process-scoped `BALCONY_SYSTEM_ID=SYS-A`, one test level
 at a time. The recorded ladder completed in the manifest order.
@@ -82,7 +111,7 @@ at a time. The recorded ladder completed in the manifest order.
 Test total: 318 passed and 1 explicit platform skip across 60 test files.
 The integration level initially exposed a reproducible `SQLITE_BUSY` race;
 after the bounded WAL-initialization fix and deterministic regression at
-`ce9fed3c`, retained in `9458a50` ancestry, the focused test passed 1/1 and the
+`ce9fed3c`, retained in the final tree's ancestry, the focused test passed 1/1 and the
 final integration run passed 34/34. The diagnosis and repetition counts are in
 the final-head review record.
 
@@ -107,26 +136,28 @@ Tool versions:
 
 ## Final source artifact
 
-`OBSERVED`: `npm pack --json` at source commit
-`9458a50afeb28fb3f759de53f3889380af983e90` produced:
+`OBSERVED / VERIFIED`: `npm pack --json` in two independent clean worktrees at
+merged source commit `e4787086b52d741f1b6d3849b0a6f90a6f24d717`, followed
+by a pack from the final tree after the test-only and evidence edits, produced
+byte-identical artifacts:
 
 | Property | Value |
 |---|---|
 | Filename | `balcony-agent-bridge-0.1.0.tgz` |
-| npm SHA-1 shasum | `1e6dacbe22530d1673b15845135e171df82e24c9` |
-| Independent SHA-256 | `5cde6070b07ec7b8ca40d0960ac5f40ba8d9eabbf43fa2119a4397a1ae224e09` |
-| npm SHA-512 integrity | `sha512-vcbJmj+xcBoC/5lMbDVMADnPsYg4+N4TLAZ9v6N0JccWClga32e3y0wYlk+2dU2lgoYT71EJi9vwCvkPDSskcg==` |
+| npm SHA-1 shasum | `08ab5e2d76b55028c86250e2a82f4fdf6c1813ef` |
+| Independent SHA-256 | `0789a272c3f7f0b58f094d4d1d47d1d3b884fda984e0ef2b1cee0a62ea946549` |
+| npm SHA-512 integrity | `sha512-A3AEduQ0luAkH9SSPEA35D/bER6IzkQdl2FqUZ6SG50Jcja6U+HRdqYnXEehL60wNJeV63Lqf1Wjrpf2aXenxA==` |
 | File count | 102 |
-| Packed size | 125,975 bytes |
-| Unpacked size | 638,832 bytes |
+| Packed size | 125,926 bytes |
+| Unpacked size | 638,976 bytes |
 | Forbidden entries | 0 |
 
 The tar listing contained zero `docs/verification/**` entries. The preserved
-tarball produced from `9458a50` is the only artifact authorized as the future
-npm publication input. Evidence-only commits follow this source and do not
-enter the npm package. Their post-commit repack must remain identical,
-but a post-merge package comparison against every field above is still required
-before tagging or publishing.
+tarball produced from the final tree is the only artifact authorized as the npm
+publication input. Both independent clean-checkout packs and the final-tree
+pack matched byte-for-byte and across every metadata field above. The two test
+files and this evidence record do not enter the npm package; one final clean
+commit pack comparison remains required before publication.
 
 ## Prior evidence and accepted limitations
 
@@ -139,21 +170,22 @@ before tagging or publishing.
   [final-head review record](./SYS-A-V0.1.0-FINAL-HEAD-REVIEW-2026-08-27.md).
 - The retained-public-history decision remains in the
   [history privacy review](./SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md).
-- The complete [known limitations](../known-limitations.md) at `9458a50`
+- The complete [known limitations](../known-limitations.md) in the final release tree
   remain accepted and canonical. This record does not imply that any accepted
   limitation was fixed except where an exact disposition is recorded above.
 
 ## Deferred operations
 
-At the time of this record, the candidate has not been pushed or merged, the
-npm package has not been published or installed from the registry, and the
-`v0.1.0` tag and GitHub Release have not been created. The future `v0.1.0` tag
-must target the eventual final evidence-containing commit (the current tagged
-tree at release creation), so the GitHub source archive retains this final
-provenance record. This evidence-only commit does not change the npm package:
-publication must use the preserved tarball produced from tested package source
-`9458a50afeb28fb3f759de53f3889380af983e90` with SHA-256
-`5cde6070b07ec7b8ca40d0960ac5f40ba8d9eabbf43fa2119a4397a1ae224e09` above.
+PR #6 was merged as `e4787086b52d741f1b6d3849b0a6f90a6f24d717` after the
+substantive exact-head Codex review of `17a9669a6531533aa0b46ffb0392ebf84f0c37c4`
+reported no major issues and all review threads were resolved. At the time of
+this record, the npm package has not been published or installed from the
+registry, and the `v0.1.0` tag and GitHub Release have not been created. The
+future `v0.1.0` tag must target the final evidence-containing commit (the
+current tagged tree at release creation), so the GitHub source archive retains
+this canonical provenance record. Publication must use the preserved clean
+merged-checkout tarball with SHA-256
+`0789a272c3f7f0b58f094d4d1d47d1d3b884fda984e0ef2b1cee0a62ea946549` above.
 Azure, RBAC, service, and live signed multi-node rollout remain separate and
 deferred.
 Approval remains distinct from completion, and each external operation

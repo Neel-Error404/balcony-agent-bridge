@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { setupLocalProfile } from "../../src/setup/local-profile.js";
 
+const cliProcessTimeoutMs = 30_000;
+const cliTestTimeoutMs = 45_000;
+
 describe("CLI explicit profile identity", () => {
   const temporaryDirectories: string[] = [];
 
@@ -64,7 +67,7 @@ describe("CLI explicit profile identity", () => {
           cwd: repositoryRoot,
           encoding: "utf8",
           env: environment,
-          timeout: 10_000,
+          timeout: cliProcessTimeoutMs,
         },
       );
 
@@ -77,7 +80,7 @@ describe("CLI explicit profile identity", () => {
       expect(result.stderr).not.toContain(databasePath);
       expect(fs.readdirSync(temporaryDirectory)).toEqual([]);
     },
-    15_000,
+    cliTestTimeoutMs,
   );
 
   it.each(["status", "doctor"])(
@@ -113,7 +116,7 @@ describe("CLI explicit profile identity", () => {
             ...process.env,
             BALCONY_SYSTEM_ID: "node-b",
           },
-          timeout: 10_000,
+          timeout: cliProcessTimeoutMs,
         },
       );
 
@@ -140,5 +143,6 @@ describe("CLI explicit profile identity", () => {
         expect(result.stderr).toBe("");
       }
     },
+    cliTestTimeoutMs,
   );
 });
