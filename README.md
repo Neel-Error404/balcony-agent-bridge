@@ -33,8 +33,17 @@ package:
 
 ```powershell
 npm view balcony-agent-bridge@0.1.0 version
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to confirm balcony-agent-bridge@0.1.0 in the npm registry; registry installation is unavailable."
+}
 npm install --global balcony-agent-bridge@0.1.0
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to install balcony-agent-bridge@0.1.0 from the npm registry; registry installation is unavailable."
+}
 balcony-agent-bridge --help
+if ($LASTEXITCODE -ne 0) {
+  throw "The installed balcony-agent-bridge@0.1.0 CLI did not start; registry installation is unavailable."
+}
 ```
 
 Source installation is available only after GitHub exposes the `v0.1.0` release

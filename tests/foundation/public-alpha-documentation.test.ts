@@ -36,6 +36,9 @@ describe("public alpha documentation contract", () => {
 
     expect(readme).toContain("npm run verify:public-alpha");
     expect(readme).toContain("npm install --global balcony-agent-bridge@0.1.0");
+    expect(readme).toContain(
+      "npm view balcony-agent-bridge@0.1.0 version\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to confirm balcony-agent-bridge@0.1.0 in the npm registry; registry installation is unavailable.\"\n}\nnpm install --global balcony-agent-bridge@0.1.0\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to install balcony-agent-bridge@0.1.0 from the npm registry; registry installation is unavailable.\"\n}\nbalcony-agent-bridge --help\nif ($LASTEXITCODE -ne 0) {\n  throw \"The installed balcony-agent-bridge@0.1.0 CLI did not start; registry installation is unavailable.\"\n}",
+    );
     expect(readme).toContain("production service installation remains a reviewed source");
     expect(readme).toContain("balcony-agent-bridge demo");
     expect(readme).toContain("replace that command with\n`node $bridgeCli`");
