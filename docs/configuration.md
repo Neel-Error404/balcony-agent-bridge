@@ -134,6 +134,41 @@ into an authorization grant. Register and grant each intended pair explicitly
 before starting or restarting a dispatcher; otherwise requests are rejected
 without resolving the project path or starting Codex.
 
+## Local Approval Workflow
+
+Schema v9 adds local SQLite approval requests without changing signed envelopes,
+MCP tools, Azure configuration, or a running service. Schema-v8 resources and
+persistent exact grants remain intact; the new request and audit tables begin
+empty, so no peer gains temporary or one-time access during migration.
+
+Only an authenticated claim to a known enabled resource that lacks an active
+persistent grant creates a pending request. Unknown, disabled, unauthenticated,
+and malformed claims create no request and receive the generic no-resource
+rejection. Requests are deduplicated by their canonical operation fingerprint;
+the first original message ID remains the request ID, and a later message is
+not an approval replay.
+
+Use the local operator CLI against the bridge database:
+
+```powershell
+& $nodePath $bridgeCli approval list [--state <state>] [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval show --request-id <uuid> [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval approve-once --request-id <uuid> [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval approve-temporary --request-id <uuid> --expires-at-utc <utc> [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval deny --request-id <uuid> [--reason <text>] [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval revoke --request-id <uuid> [--reason <text>] [--config C:\absolute\config.json]
+& $nodePath $bridgeCli approval audit [--request-id <uuid>] [--peer-id <id>] [--resource-id <id>] [--config C:\absolute\config.json]
+```
+
+`approve-once` authorizes and consumes only its exact original request. An
+ordinary dispatch retry is rejected; only an already-created durable
+consultation run may resume its same workflow. A different-message replay is
+never authorized. `approve-temporary` applies only to the exact peer/resource
+pair and only while `--expires-at-utc` is a future canonical UTC instant.
+Revoking the pair's persistent grant also revokes its active temporary
+approvals. Expiry, deny, and revoke fail closed. The audit is append-only and contains only decision
+metadata, never request bodies, filesystem paths, credentials, or claim tokens.
+
 ## Configuration That Must Stay Local
 
 Never commit or package:

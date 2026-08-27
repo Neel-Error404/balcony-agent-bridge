@@ -23,12 +23,18 @@ const REQUIRED_TABLES = [
   "consultation_runs",
   "resources",
   "peer_resource_grants",
+  "authorization_requests",
+  "authorization_audit",
 ] as const;
 const REQUIRED_INDEXES = [
   "idx_outbox_dispatch",
   "idx_inbox_claim",
   "idx_inbox_causation",
   "idx_peer_resource_grants_resource",
+  "idx_authorization_requests_pair_state",
+  "idx_authorization_requests_state_time",
+  "idx_authorization_audit_request_time",
+  "idx_authorization_audit_pair_time",
 ] as const;
 const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readonly string[]>> = {
   schema_migrations: ["version", "applied_at_utc"],
@@ -112,6 +118,32 @@ const REQUIRED_COLUMNS: Readonly<Record<(typeof REQUIRED_TABLES)[number], readon
     "state",
     "granted_at_utc",
     "revoked_at_utc",
+  ],
+  authorization_requests: [
+    "request_id",
+    "request_identity",
+    "request_fingerprint",
+    "peer_system_id",
+    "resource_id",
+    "state",
+    "requested_at_utc",
+    "decided_at_utc",
+    "decided_by",
+    "temporary_expires_at_utc",
+    "consumed_at_utc",
+    "reason",
+    "updated_at_utc",
+  ],
+  authorization_audit: [
+    "event_id",
+    "request_id",
+    "event",
+    "state",
+    "actor_id",
+    "peer_system_id",
+    "resource_id",
+    "occurred_at_utc",
+    "reason",
   ],
 };
 const TRANSPORT_TIMEOUT_MS = 10_000;

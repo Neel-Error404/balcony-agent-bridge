@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -218,6 +218,9 @@ function runInstallSmoke(useCleanCache) {
     if (!help.stdout.includes("Usage: balcony-agent-bridge <command>")) {
       throw new Error("Packaged CLI help did not contain the public command usage");
     }
+    if (!help.stdout.includes("approval  List and decide durable peer resource approval requests")) {
+      throw new Error("Packaged CLI help did not contain the approval workflow surface");
+    }
     const packageCommandHelp = runNpm(
       ["exec", "--offline", "--", "balcony-agent-bridge", "--help"],
       consumerDirectory,
@@ -398,6 +401,75 @@ function runInstallSmoke(useCleanCache) {
       throw new Error("Packaged CLI did not persist resource grant revocation");
     }
 
+    const approvalRequestId = seedPackagedApprovalRequest({
+      packageRoot,
+      databasePath,
+      consumerDirectory,
+    });
+    const pendingApprovals = runInstalledCli(
+      cliBin,
+      [
+        "approval",
+        "list",
+        "--config",
+        profilePath,
+        "--state",
+        "pending",
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(pendingApprovals, 0, "packaged CLI approval listing");
+    const pendingApprovalPayload = JSON.parse(pendingApprovals.stdout);
+    if (
+      pendingApprovalPayload.requests?.length !== 1 ||
+      pendingApprovalPayload.requests[0]?.request_id !== approvalRequestId ||
+      pendingApprovalPayload.requests[0]?.state !== "pending"
+    ) {
+      throw new Error("Packaged CLI did not list the expected pending approval");
+    }
+
+    const approvedOnce = runInstalledCli(
+      cliBin,
+      [
+        "approval",
+        "approve-once",
+        "--config",
+        profilePath,
+        "--request-id",
+        approvalRequestId,
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(approvedOnce, 0, "packaged CLI approve-once decision");
+    if (JSON.parse(approvedOnce.stdout).approval?.state !== "approved_once") {
+      throw new Error("Packaged CLI did not persist approve-once state");
+    }
+
+    const approvalAudit = runInstalledCli(
+      cliBin,
+      [
+        "approval",
+        "audit",
+        "--config",
+        profilePath,
+        "--request-id",
+        approvalRequestId,
+      ],
+      consumerDirectory,
+      { env: nodeAEnvironment },
+    );
+    requireExit(approvalAudit, 0, "packaged CLI approval audit");
+    const auditEvents = JSON.parse(approvalAudit.stdout).events;
+    if (
+      !Array.isArray(auditEvents) ||
+      auditEvents.map((event) => event.state).join(",") !==
+        "pending,approved_once"
+    ) {
+      throw new Error("Packaged CLI approval audit was incomplete");
+    }
+
     const defaultDataRoot = path.join(temporaryDirectory, "default-data-root");
     const defaultEnvironment = {
       ...process.env,
@@ -512,6 +584,76 @@ function runInstallSmoke(useCleanCache) {
       retryDelay: 100,
     });
   }
+}
+
+function seedPackagedApprovalRequest({
+  packageRoot,
+  databasePath,
+  consumerDirectory,
+}) {
+  const databaseModule = pathToFileURL(
+    path.join(packageRoot, "dist", "storage", "database.js"),
+  ).href;
+  const envelopeModule = pathToFileURL(
+    path.join(packageRoot, "dist", "contracts", "envelope.js"),
+  ).href;
+  const script = `
+    import { BridgeDatabase } from ${JSON.stringify(databaseModule)};
+    import { createEnvelope } from ${JSON.stringify(envelopeModule)};
+    const database = new BridgeDatabase(process.env.BALCONY_TEST_DATABASE_PATH);
+    try {
+      const envelope = createEnvelope({
+        idempotencyKey: "package-approval-request",
+        originSystem: "node-b",
+        targetSystem: "node-a",
+        kind: "task_request",
+        streamId: "package-approval",
+        payload: {
+          subject: "Package approval smoke",
+          body: "Package smoke request body",
+          project: "package-resource",
+          evidence: [],
+          dispatch: { executor: "codex_cli", access: "read_only" }
+        }
+      });
+      database.persistIncoming(envelope, 1, new Date(), true);
+      const consumerId = "package-approval-seed";
+      const claim = database.claimReadOnlyDispatchInbox(consumerId, 1, 720)[0];
+      if (!claim) throw new Error("Packaged approval request was not claimable");
+      const decision = database.authorizeClaimedResourceAccess({
+        requestMessageId: envelope.message_id,
+        consumerId,
+        claimToken: claim.claimToken,
+        resourceId: "package-resource",
+        actorId: "node-a"
+      });
+      if (decision.status !== "approval_pending") {
+        throw new Error("Packaged approval request did not become pending");
+      }
+      process.stdout.write(envelope.message_id);
+    } finally {
+      database.close();
+    }
+  `;
+  const seeded = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", script],
+    {
+      cwd: consumerDirectory,
+      encoding: "utf8",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        BALCONY_TEST_DATABASE_PATH: databasePath,
+      },
+    },
+  );
+  requireExit(seeded, 0, "packaged approval request seed");
+  const requestId = seeded.stdout.trim();
+  if (!/^[0-9a-f-]{36}$/iu.test(requestId)) {
+    throw new Error("Packaged approval seed returned an invalid request identifier");
+  }
+  return requestId;
 }
 
 function packagePeerEnrollment(nodeId) {

@@ -122,19 +122,29 @@ flowchart LR
 | Membership file | Add unknown fields, duplicate peers/keys, wrong key type/ID, or peer-list drift | Startup/configuration rejection | Foundation membership tests |
 | Signing-key file | Supply relative, symlinked, oversized, non-PKCS8, or non-Ed25519 file | Startup/configuration rejection without value echo | Foundation authentication/config tests |
 | Identity output | Pre-create or symlink output files; repeat generation | No overwrite; generic failure | Foundation identity and CLI integration tests |
-| Authorized peer | Send valid but malicious task content or request an ungranted project | Exact active peer/resource grant plus enabled resource is required before project resolution, context loading, or execution | A granted peer can inspect the complete registered tree; filesystem review remains necessary |
+| Authorized peer | Send valid but malicious task content or request an ungranted project | Exact active peer/resource grant plus enabled resource is required before project resolution, context loading, or execution. An authenticated known enabled ungranted claim is parked for local approval; unknown, disabled, and unauthenticated claims receive the same generic rejection and create no approval row | A granted peer can inspect the complete registered tree; filesystem review remains necessary |
 | Local MCP caller | Read an explicitly requested inbox item | Message body may be returned by design | Local OS/process authorization; not expanded in Phase 4 |
 | Azure principal | Publish to topic outside intended logical edge | Receiver rejects invalid signed target/origin, but broker/DLQ load remains | Azure RBAC/filter review plus runtime monitoring, owner-gated |
 
 `peer_readable: true` is only the machine-local path eligibility gate. Durable
 SQLite policy independently requires an enabled resource and an active grant
 for the exact authenticated origin. Missing, disabled, revoked, malformed, or
-unauthenticated state fails closed before project resolution. Existing v0.1
-state receives no grants automatically during schema-v8 migration.
+unauthenticated state fails closed before project resolution. Schema v8 state
+receives no grants automatically, and schema v9 preserves those grants while
+adding empty local approval and append-only metadata-audit tables. One-time
+approval is bound to the original request; temporary approval is bound to the
+exact peer/resource pair and strict UTC expiry. Deny, revoke, and expiry fail
+closed. Approval does not add a network control plane or change wire/MCP/live
+service behavior.
 File checks are intentionally defense in depth, not protection from a local
 administrator: an attacker able to replace a file between validation and read,
 or to control the bridge service account, is already inside the host trust
 boundary.
+
+Approval commands and SQLite data remain protected by local OS/process identity
+trust. They do not add a remote operator identity boundary. Signer key IDs are
+still not retained as a separate inbox audit field, which remains a low-severity
+forensic limitation.
 
 ## 4. Severity Calibration
 

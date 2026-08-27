@@ -103,13 +103,17 @@ export class ReadOnlyDispatcher {
         claim.envelope,
         this.config.defaultTimeoutSeconds,
       );
-      if (
-        !claim.authenticatedIngress ||
-        !this.database.isPeerAuthorizedForResource(
-          claim.envelope.origin_system,
-          task.project,
-        )
-      ) {
+      const authorization = this.database.authorizeClaimedResourceAccess({
+        requestMessageId: claim.envelope.message_id,
+        consumerId: this.consumerId,
+        claimToken: claim.claimToken,
+        resourceId: task.project,
+        actorId: this.config.systemId,
+      });
+      if (authorization.status === "approval_pending") {
+        return;
+      }
+      if (authorization.status !== "authorized") {
         throw new DispatchRejectedError(
           "The requested resource is not authorized for this peer.",
         );
@@ -259,7 +263,7 @@ export class ReadOnlyDispatcher {
       payload: {
         subject: subject.slice(0, 200),
         body,
-        ...(original.payload.project
+        ...(outcome === "processed" && original.payload.project
           ? { project: original.payload.project }
           : {}),
         ...(original.payload.task_reference

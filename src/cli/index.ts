@@ -12,7 +12,9 @@ import {
   loadConfigFile,
 } from "../config.js";
 import { NodeIdSchema } from "../contracts/envelope.js";
+import { AuthorizationRequestStateSchema } from "../contracts/approval.js";
 import { ResourceIdSchema } from "../contracts/resource-authorization.js";
+import { StateTransitionError } from "../errors.js";
 import { generateNodeIdentity } from "../security/node-identity.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
 import { setupLocalProfile } from "../setup/local-profile.js";
@@ -30,6 +32,7 @@ Commands:
   status    Print local durable bridge status as JSON
   resource  Register, list, enable, or disable local resources
   grant     Create, list, or revoke per-peer resource grants
+  approval  List and decide durable peer resource approval requests
   help      Show this help message
 
 Common options:
@@ -61,6 +64,15 @@ Grant options:
   grant create --peer-id <id> --resource-id <id> [--config <absolute-path>]
   grant list [--peer-id <id>] [--config <absolute-path>]
   grant revoke --peer-id <id> --resource-id <id> [--config <absolute-path>]
+
+Approval options:
+  approval list [--state <state>] [--config <absolute-path>]
+  approval show --request-id <uuid> [--config <absolute-path>]
+  approval approve-once --request-id <uuid> [--config <absolute-path>]
+  approval approve-temporary --request-id <uuid> --expires-at-utc <utc> [--config <absolute-path>]
+  approval deny --request-id <uuid> [--reason <text>] [--config <absolute-path>]
+  approval revoke --request-id <uuid> [--reason <text>] [--config <absolute-path>]
+  approval audit [--request-id <uuid>] [--peer-id <id>] [--resource-id <id>] [--config <absolute-path>]
 
 Examples:
   balcony-agent-bridge demo
@@ -103,6 +115,9 @@ async function main(): Promise<void> {
         return;
       case "grant":
         runGrant(process.argv.slice(3));
+        return;
+      case "approval":
+        runApproval(process.argv.slice(3));
         return;
       default:
         throw new CliUsageError(`Unknown command: ${command}`);
@@ -383,8 +398,138 @@ function runGrant(args: readonly string[]): void {
     const resourceId = ResourceIdSchema.parse(values["resource-id"]);
     const grant = action === "create"
       ? database.grantPeerResource(peerId!, resourceId)
-      : database.revokePeerResource(peerId!, resourceId);
+      : database.revokePeerResource(
+          peerId!,
+          resourceId,
+          new Date(),
+          config.systemId,
+        );
     writeJson({ ok: true, grant: formatGrant(grant) });
+  } finally {
+    database.close();
+  }
+}
+
+function runApproval(args: readonly string[]): void {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      config: { type: "string" },
+      "request-id": { type: "string" },
+      state: { type: "string" },
+      "peer-id": { type: "string" },
+      "resource-id": { type: "string" },
+      "expires-at-utc": { type: "string" },
+      reason: { type: "string" },
+    },
+  });
+  if (positionals.length !== 1) {
+    throw new CliUsageError("approval requires exactly one action");
+  }
+  const action = positionals[0]!;
+  const actions = [
+    "list",
+    "show",
+    "approve-once",
+    "approve-temporary",
+    "deny",
+    "revoke",
+    "audit",
+  ];
+  if (!actions.includes(action)) {
+    throw new CliUsageError("invalid approval action");
+  }
+  const requestActions = [
+    "show",
+    "approve-once",
+    "approve-temporary",
+    "deny",
+    "revoke",
+  ];
+  if (requestActions.includes(action) && !values["request-id"]) {
+    throw new CliUsageError(`${action} requires --request-id`);
+  }
+  if (action === "approve-temporary" && !values["expires-at-utc"]) {
+    throw new CliUsageError(
+      "approve-temporary requires --request-id and --expires-at-utc",
+    );
+  }
+  if (action === "list" && (values["peer-id"] || values["resource-id"])) {
+    throw new CliUsageError("approval list accepts only --state filters");
+  }
+  if (action !== "audit" && action !== "list" && values.state) {
+    throw new CliUsageError("--state is valid only for approval list");
+  }
+
+  const config = loadCliConfig(values.config);
+  const database = new BridgeDatabase(config.databasePath);
+  try {
+    if (action === "list") {
+      const state = values.state
+        ? AuthorizationRequestStateSchema.parse(values.state)
+        : undefined;
+      writeJson({
+        requests: database
+          .listAuthorizationRequests(state ? { state } : {})
+          .map(formatApproval),
+      });
+      return;
+    }
+    if (action === "audit") {
+      const peerId = values["peer-id"]
+        ? NodeIdSchema.parse(values["peer-id"])
+        : undefined;
+      const resourceId = values["resource-id"]
+        ? ResourceIdSchema.parse(values["resource-id"])
+        : undefined;
+      writeJson({
+        events: database
+          .listAuthorizationAudit({
+            ...(values["request-id"]
+              ? { requestId: values["request-id"] }
+              : {}),
+            ...(peerId ? { peerSystemId: peerId } : {}),
+            ...(resourceId ? { resourceId } : {}),
+          })
+          .map(formatApprovalAudit),
+      });
+      return;
+    }
+
+    const requestId = values["request-id"]!;
+    if (action === "show") {
+      const request = database.getAuthorizationRequest(requestId);
+      if (!request) {
+        throw new StateTransitionError("Authorization request does not exist");
+      }
+      writeJson({ request: formatApproval(request) });
+      return;
+    }
+    const approval = action === "approve-once"
+      ? database.approveAuthorizationRequestOnce({
+          requestId,
+          actorId: config.systemId,
+        })
+      : action === "approve-temporary"
+        ? database.approveAuthorizationRequestTemporary({
+            requestId,
+            actorId: config.systemId,
+            expiresAtUtc: values["expires-at-utc"]!,
+          })
+        : action === "deny"
+          ? database.denyAuthorizationRequest({
+              requestId,
+              actorId: config.systemId,
+              ...(values.reason ? { reason: values.reason } : {}),
+            })
+          : database.revokeAuthorizationRequest({
+              requestId,
+              actorId: config.systemId,
+              ...(values.reason ? { reason: values.reason } : {}),
+            });
+    writeJson({ ok: true, approval: formatApproval(approval) });
   } finally {
     database.close();
   }
@@ -425,6 +570,50 @@ function formatGrant(grant: {
     state: grant.state,
     granted_at_utc: grant.grantedAtUtc,
     ...(grant.revokedAtUtc ? { revoked_at_utc: grant.revokedAtUtc } : {}),
+  };
+}
+
+function formatApproval(approval: {
+  requestId: string;
+  peerSystemId: string;
+  resourceId: string;
+  state: string;
+  requestedAtUtc: string;
+  temporaryExpiresAtUtc?: string;
+}): Record<string, unknown> {
+  return {
+    request_id: approval.requestId,
+    peer_id: approval.peerSystemId,
+    resource_id: approval.resourceId,
+    state: approval.state,
+    requested_at_utc: approval.requestedAtUtc,
+    ...(approval.temporaryExpiresAtUtc
+      ? { expires_at_utc: approval.temporaryExpiresAtUtc }
+      : {}),
+  };
+}
+
+function formatApprovalAudit(event: {
+  eventId: string;
+  requestId: string;
+  event: string;
+  state: string;
+  actorId: string;
+  peerSystemId: string;
+  resourceId: string;
+  occurredAtUtc: string;
+  reason?: string;
+}): Record<string, unknown> {
+  return {
+    event_id: event.eventId,
+    request_id: event.requestId,
+    event: event.event,
+    state: event.state,
+    actor_id: event.actorId,
+    peer_id: event.peerSystemId,
+    resource_id: event.resourceId,
+    occurred_at_utc: event.occurredAtUtc,
+    ...(event.reason ? { reason: event.reason } : {}),
   };
 }
 

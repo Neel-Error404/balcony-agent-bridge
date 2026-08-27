@@ -126,7 +126,7 @@ describe("read-only dispatcher resource authorization boundary", () => {
     temporaryDirectories.length = 0;
   });
 
-  it("rejects an ungranted request before resolving the project or starting Codex", async () => {
+  it("parks an ungranted request before resolving the project or starting Codex", async () => {
     const fixture = createFixture();
     fixture.database.registerResource("voiceai");
     const projectLookup = vi.spyOn(fixture.registry, "get");
@@ -135,12 +135,9 @@ describe("read-only dispatcher resource authorization boundary", () => {
     expect(await fixture.dispatcher.runOnce()).toBe(1);
     expect(projectLookup).not.toHaveBeenCalled();
     expect(fixture.executor.inputs).toHaveLength(0);
-    expect(fixture.database.getStatus().inbox.rejected).toBe(1);
-
-    const reply = fixture.database.leaseOutbox("test", 1, 60)[0]!;
-    expect(reply.envelope.payload.body).toContain("configured read-only project policy");
-    expect(reply.envelope.payload.body).not.toContain(fixture.projectDirectory);
-    expect(reply.envelope.payload.body).not.toContain("RESOURCE_CONTENT_SENTINEL");
+    expect(fixture.database.getStatus().inbox.quarantined).toBe(1);
+    expect(fixture.database.listAuthorizationRequests()).toHaveLength(1);
+    expect(fixture.database.leaseOutbox("test", 1, 60)).toEqual([]);
 
     fixture.close();
   });
@@ -160,12 +157,12 @@ describe("read-only dispatcher resource authorization boundary", () => {
     fixture.close();
   });
 
-  it("denies unauthenticated, revoked, disabled, and peer-mismatched requests", async () => {
+  it("rejects invalid provenance/resource state and parks missing active grants", async () => {
     const cases = [
-      { name: "unauthenticated", authenticated: false },
-      { name: "revoked", authenticated: true, revoke: true },
-      { name: "disabled", authenticated: true, disable: true },
-      { name: "peer-mismatch", authenticated: true, grantPeer: "SYS-B" as const },
+      { name: "unauthenticated", authenticated: false, expected: "rejected" },
+      { name: "revoked", authenticated: true, revoke: true, expected: "quarantined" },
+      { name: "disabled", authenticated: true, disable: true, expected: "rejected" },
+      { name: "peer-mismatch", authenticated: true, grantPeer: "SYS-B" as const, expected: "quarantined" },
     ];
 
     for (const testCase of cases) {
@@ -181,8 +178,9 @@ describe("read-only dispatcher resource authorization boundary", () => {
       if (testCase.disable) {
         fixture.database.setResourceEnabled("voiceai", false);
       }
+      const envelope = request(testCase.name);
       fixture.database.persistIncoming(
-        request(testCase.name),
+        envelope,
         1,
         new Date(),
         testCase.authenticated,
@@ -190,7 +188,14 @@ describe("read-only dispatcher resource authorization boundary", () => {
 
       expect(await fixture.dispatcher.runOnce()).toBe(1);
       expect(fixture.executor.inputs, testCase.name).toHaveLength(0);
-      expect(fixture.database.getStatus().inbox.rejected, testCase.name).toBe(1);
+      expect(
+        fixture.database.getInboxMessage(envelope.message_id)?.state,
+        testCase.name,
+      ).toBe(testCase.expected);
+      expect(
+        fixture.database.listAuthorizationRequests(),
+        testCase.name,
+      ).toHaveLength(testCase.expected === "quarantined" ? 1 : 0);
       fixture.close();
     }
   });

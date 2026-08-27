@@ -166,7 +166,7 @@ proves Azure connectivity.
 ## Configure A Node
 
 Choose one stable lowercase node ID and the complete list of remote nodes this
-machine may contact. Setup creates a private local JSON profile plus a v8
+machine may contact. Setup creates a private local JSON profile plus a v9
 SQLite database:
 
 ```powershell
@@ -403,11 +403,38 @@ $env:BALCONY_SYSTEM_ID = "build-node"
 ```
 
 Resource IDs are normalized to lowercase and must match the project key in the
-machine-local dispatcher registry. Existing databases migrate to schema v8
-with no resources or grants, so the migration is deny-by-default. Use
+machine-local dispatcher registry. Existing databases migrate to schema v9
+with no new grants or approval decisions, so the migration is deny-by-default.
+Schema-v8 resources and persistent peer/resource grants are preserved. Use
 `grant revoke` to remove one peer/resource grant and `resource disable` to
 suspend all grants for one resource. A revoked grant is retained durably; it is
 not deleted.
+
+When an authenticated peer claims a known enabled resource without an exact
+persistent grant, dispatch parks the original request in local SQLite for an
+operator decision. Unknown, disabled, unauthenticated, or malformed claims do
+not create an approval request and receive the same generic no-resource
+rejection. Approval is local to this node and database; it does not alter the
+wire format, MCP contract, or a live service.
+
+```powershell
+& $nodePath $bridgeCli approval list --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval show --request-id 11111111-1111-4111-8111-111111111111 --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval approve-once --request-id 11111111-1111-4111-8111-111111111111 --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval approve-temporary --request-id 11111111-1111-4111-8111-111111111111 --expires-at-utc 2026-08-27T12:05:00.000Z --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval deny --request-id 11111111-1111-4111-8111-111111111111 --reason policy-denied --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval revoke --request-id 11111111-1111-4111-8111-111111111111 --reason operator-revoked --config C:\absolute\path\config.json
+& $nodePath $bridgeCli approval audit --request-id 11111111-1111-4111-8111-111111111111 --config C:\absolute\path\config.json
+```
+
+`approve-once` is consumed only by its exact original request. A later ordinary
+dispatch retry is rejected; an already-created durable consultation run may
+resume its same workflow, but the approval never authorizes a different
+message ID. `approve-temporary` authorizes only the exact peer/resource pair
+until the supplied canonical UTC expiry. Temporary approval is also revoked
+when the pair's persistent grant is revoked; expiry and revocation fail closed.
+The local audit is append-only and stores decision metadata only, never message
+bodies, paths, credentials, or claim tokens.
 
 Read-only execution prevents mutation; it is not a confidentiality boundary.
 Never register a project that contains local credentials, private keys,

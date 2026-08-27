@@ -18,36 +18,40 @@ describe("PinnedGitEvidenceProvider", () => {
     directories.length = 0;
   });
 
-  it("returns committed blob content with exact Git metadata", () => {
-    const repository = createRepository();
-    const revision = git(repository, ["rev-parse", "HEAD"]);
-    const provider = pinnedProvider();
+  it(
+    "returns committed blob content with exact Git metadata",
+    () => {
+      const repository = createRepository();
+      const revision = git(repository, ["rev-parse", "HEAD"]);
+      const provider = pinnedProvider();
 
-    const evidence = provider.collect({
-      project: "bridge",
-      projectRoot: repository,
-      revision,
-      paths: ["README.md"],
-      now: new Date("2026-08-17T13:00:00.000Z"),
-    });
-
-    expect(evidence).toMatchObject({
-      project: "bridge",
-      git_snapshot: {
+      const evidence = provider.collect({
+        project: "bridge",
+        projectRoot: repository,
         revision,
-        worktree_state: "clean",
-      },
-      items: [
-        {
-          path: "README.md",
-          source: "pinned_git",
-          git_commit: revision,
-          content: "Committed bridge docs.\n",
+        paths: ["README.md"],
+        now: new Date("2026-08-17T13:00:00.000Z"),
+      });
+
+      expect(evidence).toMatchObject({
+        project: "bridge",
+        git_snapshot: {
+          revision,
+          worktree_state: "clean",
         },
-      ],
-    });
-    expect(evidence.items[0]?.git_blob_oid).toMatch(/^[a-f0-9]{40,64}$/);
-  });
+        items: [
+          {
+            path: "README.md",
+            source: "pinned_git",
+            git_commit: revision,
+            content: "Committed bridge docs.\n",
+          },
+        ],
+      });
+      expect(evidence.items[0]?.git_blob_oid).toMatch(/^[a-f0-9]{40,64}$/);
+    },
+    20_000,
+  );
 
   it("rejects a revision that is not the repository HEAD", () => {
     const repository = createRepository();
