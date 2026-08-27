@@ -1,9 +1,11 @@
 # v0.1 Public Alpha Release Manifest
 
-This manifest defines the decision gate for `balcony-agent-bridge` version
-`0.1.0`. The source repository is public, but this is not a supported-release
-or npm-publication record. The package remains `private: true` until the owner
-separately approves npm publication.
+This manifest defines the release gate for `balcony-agent-bridge` version
+`0.1.0`. The owner approved public npm publication, a `v0.1.0` Git tag and
+GitHub Release, retained public history, private vulnerability reporting, and a
+separately gated live multi-node rollout on 2026-08-26. Publication and rollout
+are complete only when their remote evidence is recorded; approval alone is
+not completion.
 
 ## Included Source Surfaces
 
@@ -29,11 +31,23 @@ Private profiles, deployment parameters, rendered service XML, databases,
 logs, credentials, founder handoffs, machine inventories, and local evidence
 remain outside the public release.
 
-Observed state differs from this intended clean-export boundary: the public Git
-history currently includes several operational evidence paths listed above.
-Reachable-history scanning reports no known credential patterns, but the owner
-must accept that history after privacy review or approve a clean/sanitized
-replacement before declaring a supported release.
+### v0.1 GitHub Source-Archive Exception
+
+The owner accepted the already-public repository tree as the `v0.1.0` GitHub
+source archive. It includes `AGENTS.md`, `docs/handoff/**`,
+`docs/verification/**`, `docs/plans/**`, `docs/costs.md`, and
+`docs/runbooks/sys-a-physical-host.md` as an explicit exception to the original
+clean-export plan. This exception applies only to the GitHub source archive;
+none of those paths is permitted in the npm artifact.
+
+Observed state differs from the original clean-export boundary: public Git
+history includes operational evidence paths listed above. The owner accepted
+that existing history for `v0.1.0` after a dedicated review found no live cloud
+tenant identifier, credential, private key, connection string, access token,
+non-example Service Bus hostname, or user-profile credential path. Rewriting
+already-public history was rejected because it would break clones without
+retracting existing copies. The supporting evidence is recorded in
+`docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md`.
 
 ## npm Artifact Boundary
 
@@ -48,8 +62,8 @@ The artifact intentionally excludes source, tests, docs, infrastructure,
 service templates, PowerShell scripts, verification records, and machine-local
 state. README paths into source documentation are plain repository references,
 not packaged-file links. Package metadata points installed-package readers to
-the public repository, README, and issue tracker; npm publication remains
-disabled.
+the public repository, README, and issue tracker; `publishConfig.access` is
+fixed to `public`.
 
 ## Required Local Checks
 
@@ -91,22 +105,20 @@ consumption on the current host only.
 These checks require explicit authority and are not implied by local success:
 
 - review the exact release diff and confirm every included path is public;
-- create or verify a clean public Git history/export and rerun the history
-  secret scan on the exact release object;
-- set a concrete private vulnerability-reporting contact/channel;
-- remove `private: true`, choose npm access/tag, and publish the exact reviewed
-  tarball;
-- create an approved version tag and GitHub release if that distribution path
-  is selected;
+- rerun the current-tree and reachable-history scan on the exact release
+  candidate;
+- verify GitHub private vulnerability reporting;
+- publish the exact reviewed tarball with public npm access;
+- create the approved `v0.1.0` tag and GitHub release;
 - review Azure `what-if`, identity inventory, network exposure, RBAC, budget,
   and diagnostic settings before deployment;
 - install/restart services or change any live node;
 - prove a signed round trip, restart recovery, duplicate handling, and
   revocation across real authorized machines.
 
-Package or release publication, history replacement, Azure deployment, RBAC
-mutation, and live cutover are distinct approval events. None is a side effect
-of the local release checks.
+Package and release publication, Azure deployment, RBAC mutation, and live
+cutover remain distinct operations even though the owner approved them in the
+same release instruction. Each still requires its own verification evidence.
 
 ## Release Decision Record
 

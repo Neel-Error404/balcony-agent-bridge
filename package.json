@@ -1,7 +1,6 @@
 {
   "name": "balcony-agent-bridge",
   "version": "0.1.0",
-  "private": true,
   "license": "Apache-2.0",
   "description": "Durable MCP bridge for secret-safe coordination between coding agents",
   "repository": {
@@ -12,6 +11,9 @@
   "bugs": {
     "url": "https://github.com/Neel-Error404/balcony-agent-bridge/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "files": [
     "dist",
@@ -21,8 +23,8 @@
     "SECURITY.md"
   ],
   "bin": {
-    "balcony-agent-bridge": "./dist/cli/index.js",
-    "balcony-agent-bridge-mcp": "./dist/mcp/index.js"
+    "balcony-agent-bridge": "dist/cli/index.js",
+    "balcony-agent-bridge-mcp": "dist/mcp/index.js"
   },
   "engines": {
     "node": ">=22.0.0",

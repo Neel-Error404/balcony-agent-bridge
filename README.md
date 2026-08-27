@@ -10,10 +10,12 @@ authorized nodes, direct one-to-one routing, one production transport, and an
 optional read-only Codex dispatcher. It is not a hosted discovery service, a
 file-sync product, or a writable remote-execution platform.
 
-This repository is a public source alpha under Apache-2.0. Anyone may clone,
-build, inspect, modify, and use it under that license. Version `0.1.0` is not
-published to npm and remains `private: true`, so installation is currently from
-source or a locally built tarball rather than a public package registry.
+This repository is public under Apache-2.0, and version `0.1.0` is approved for
+public npm distribution as an alpha. Anyone may clone, build, inspect, modify,
+and use it under that license. The npm artifact is for local CLI and MCP
+evaluation; production service installation remains a reviewed source
+operation because the package intentionally excludes infrastructure and
+Windows service-management scripts.
 
 ## Install
 
@@ -26,18 +28,97 @@ Requirements:
 - Azure access only when deliberately deploying or checking the production
   transport.
 
-From a source checkout:
+After the registry reports version `0.1.0`, install the public CLI and MCP
+package:
+
+```powershell
+npm view balcony-agent-bridge@0.1.0 version
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to confirm balcony-agent-bridge@0.1.0 in the npm registry; registry installation is unavailable."
+}
+npm install --global balcony-agent-bridge@0.1.0
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to install balcony-agent-bridge@0.1.0 from the npm registry; registry installation is unavailable."
+}
+$globalNodeModules = npm root --global
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($globalNodeModules)) {
+  throw "Unable to resolve the global npm package directory; registry installation is unavailable."
+}
+$packageDirectory = Join-Path $globalNodeModules "balcony-agent-bridge"
+$packageManifest = Join-Path $packageDirectory "package.json"
+if (-not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {
+  throw "The installed balcony-agent-bridge package manifest is missing; registry installation is unavailable."
+}
+$installedPackage = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json
+if ($installedPackage.version -ne "0.1.0") {
+  throw "The installed balcony-agent-bridge version is not 0.1.0; registry installation is unavailable."
+}
+$bridgeCli = Join-Path $packageDirectory "dist/cli/index.js"
+if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
+  throw "The installed balcony-agent-bridge@0.1.0 CLI entrypoint is missing; registry installation is unavailable."
+}
+$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
+if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
+  throw "Unable to resolve the Node application path; registry installation is unavailable."
+}
+& $nodePath $bridgeCli --help
+$cliStarted = $?
+$cliExitCode = $LASTEXITCODE
+if (-not $cliStarted -or $cliExitCode -ne 0) {
+  throw "The installed balcony-agent-bridge@0.1.0 CLI did not start; registry installation is unavailable."
+}
+```
+
+Source installation is available only after GitHub exposes the `v0.1.0` release
+tag. Fetch tags, stop clearly if that tag is unavailable, then check out the
+reviewed tag detached before installing dependencies:
 
 ```powershell
 git clone https://github.com/Neel-Error404/balcony-agent-bridge.git
-Set-Location balcony-agent-bridge
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to clone the GitHub source repository; source installation is unavailable."
+}
+Set-Location balcony-agent-bridge -ErrorAction Stop
+git fetch --tags --force
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to fetch GitHub release tags; source installation is unavailable."
+}
+if (-not (git tag --list v0.1.0)) {
+  throw "GitHub has not exposed the v0.1.0 release tag; source installation is unavailable."
+}
+git checkout --detach v0.1.0
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to check out the v0.1.0 release tag; source installation is unavailable."
+}
 npm ci
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to install source dependencies; source installation is unavailable."
+}
 npm run build
-$bridgeCli = (Resolve-Path .\dist\cli\index.js).Path
-node $bridgeCli --help
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to build the v0.1.0 source checkout; source installation is unavailable."
+}
+$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
+if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
+  throw "Unable to resolve the Node application path; source installation is unavailable."
+}
+$bridgeCli = (Resolve-Path -LiteralPath .\dist\cli\index.js -ErrorAction Stop).Path
+if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
+  throw "The built balcony-agent-bridge CLI entrypoint is missing; source installation is unavailable."
+}
+& $nodePath $bridgeCli --help
+$cliStarted = $?
+$cliExitCode = $LASTEXITCODE
+if (-not $cliStarted -or $cliExitCode -ne 0) {
+  throw "The built balcony-agent-bridge@0.1.0 CLI did not start; source installation is unavailable."
+}
 ```
 
-To evaluate the exact npm artifact without publishing it:
+Both install paths resolve `$nodePath` and `$bridgeCli`. Keep those values in
+the same PowerShell session and invoke the exact resolved CLI as
+`& $nodePath $bridgeCli`; do not rely on a global PATH shim.
+
+To evaluate the exact npm artifact from a source checkout:
 
 ```powershell
 npm pack
@@ -61,8 +142,7 @@ try {
 }
 ```
 
-The remaining commands assume the source-checkout `$bridgeCli` defined in the
-first snippet. The core Node runtime may work on other operating systems, but
+The core Node runtime may work on other operating systems, but
 this release candidate has only been verified on Windows; translate paths and
 shell syntax before evaluating it elsewhere.
 
@@ -76,7 +156,7 @@ configuration.
 Run the deterministic three-node round trip before configuring Azure:
 
 ```powershell
-node $bridgeCli demo
+& $nodePath $bridgeCli demo
 ```
 
 The expected JSON contains `"result":"passed"` and `"azure_used":false`.
@@ -91,7 +171,7 @@ SQLite database:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "laptop-a"
-node $bridgeCli setup `
+& $nodePath $bridgeCli setup `
   --node-id laptop-a `
   --authorized-node laptop-b `
   --authorized-node build-node
@@ -144,7 +224,7 @@ ACL procedure in `docs/message-authentication.md` for the same output directory:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-node .\dist\cli\index.js identity `
+& $nodePath $bridgeCli identity `
   --node-id build-node `
   --output-directory "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node-identity"
 ```
@@ -173,7 +253,7 @@ but before it is started, create the matching production profile:
 
 ```powershell
 $env:BALCONY_SYSTEM_ID = "build-node"
-node .\dist\cli\index.js setup `
+& $nodePath $bridgeCli setup `
   --config "$env:LOCALAPPDATA\Balcony\AgentBridge\build-node.json" `
   --database "$env:ProgramData\Balcony\AgentBridge\data\bridge.sqlite3" `
   --node-id build-node `
@@ -208,15 +288,15 @@ isolated validation invocation of the bridge service entrypoint, so the CLI
 process does not load signing material:
 
 ```powershell
-node .\dist\cli\index.js doctor --config "C:\absolute\path\config.json"
-node .\dist\cli\index.js status --config "C:\absolute\path\config.json"
+& $nodePath $bridgeCli doctor --config "C:\absolute\path\config.json"
+& $nodePath $bridgeCli status --config "C:\absolute\path\config.json"
 ```
 
 After Azure identity and RBAC are ready, explicitly probe only the sender
 link:
 
 ```powershell
-node .\dist\cli\index.js doctor `
+& $nodePath $bridgeCli doctor `
   --config "C:\absolute\path\config.json" `
   --check-transport
 ```
@@ -337,10 +417,10 @@ level. `docs/release-manifest-v0.1.md` separates locally verifiable checks from
 owner-gated Git history, publication, Azure, service, and live multi-node
 checks.
 
-The source repository is public. The npm package remains unpublished and
-`private: true`; these commands do not publish, deploy, install a service,
-change RBAC, or alter a live bridge. See `SECURITY.md` before reporting a
-vulnerability and `docs/ROADMAP.md` for the implementation journey and current
-release gates.
+The source repository is public and version `0.1.0` is the approved npm and
+GitHub release target. Confirm external package availability with `npm view`.
+The commands above do not deploy Azure resources, install a service, change
+RBAC, or alter a live bridge. See `SECURITY.md` before reporting a vulnerability
+and `docs/ROADMAP.md` for the implementation journey and current release gates.
 
 The local verification workflow does not publish anything.

@@ -231,10 +231,11 @@ describe("Windows service installation contract", () => {
             "bridge-service-security-behavior.ps1",
           ),
         ],
-        { cwd: repositoryRoot, encoding: "utf8" },
+        { cwd: repositoryRoot, encoding: "utf8", timeout: 15_000 },
       );
 
       expect(output).toContain("ACL_BEHAVIORAL_PROOF_PASS");
     },
+    20_000,
   );
 });

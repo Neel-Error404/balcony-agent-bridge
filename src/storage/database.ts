@@ -20,7 +20,7 @@ import {
   IdempotencyConflictError,
   StateTransitionError,
 } from "../errors.js";
-import { normalizeErrorCode } from "../security/sanitize-error.js";
+import { normalizeErrorCode, safeErrorCode } from "../security/sanitize-error.js";
 
 export type OutboxState =
   | "pending"
@@ -121,6 +121,7 @@ export type EffectiveRuntimeStatus = "healthy" | "degraded" | "stale";
 
 const BRIDGE_STALE_AFTER_MS = 30 * 60 * 1000;
 const DISPATCHER_STALE_AFTER_MS = 10 * 60 * 1000;
+const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
 export interface BridgeStatus {
   outbox: Record<OutboxState, number>;
@@ -160,14 +161,59 @@ export class BridgeDatabase {
     this.database = new Database(databasePath);
     try {
       this.assertSupportedSchemaVersion();
-      this.database.pragma("busy_timeout = 5000");
-      this.database.pragma("journal_mode = WAL");
+      this.database.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+      if (databasePath !== ":memory:") {
+        this.ensureWalMode();
+      }
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("synchronous = FULL");
       this.migrate();
     } catch (error) {
       this.database.close();
       throw error;
+    }
+  }
+
+  private ensureWalMode(): void {
+    const deadline = Date.now() + SQLITE_BUSY_TIMEOUT_MS;
+    let retryDelayMs = 5;
+
+    while (true) {
+      let journalMode: unknown;
+      try {
+        journalMode = this.database.pragma("journal_mode = WAL", {
+          simple: true,
+        });
+      } catch (error) {
+        const remainingMs = deadline - Date.now();
+        const isBusy = safeErrorCode(error) === "SQLITE_BUSY";
+        if (!isBusy || remainingMs <= 0) {
+          const context = isBusy
+            ? `Timed out after ${SQLITE_BUSY_TIMEOUT_MS}ms enabling SQLite WAL mode; another process may be holding the database lock`
+            : "Failed to enable SQLite WAL mode";
+          if (error instanceof Error) {
+            error.message = `${context}: ${error.message}`;
+            throw error;
+          }
+          throw new StateTransitionError(`${context}: ${String(error)}`);
+        }
+
+        Atomics.wait(
+          new Int32Array(new SharedArrayBuffer(4)),
+          0,
+          0,
+          Math.min(retryDelayMs, remainingMs),
+        );
+        retryDelayMs = Math.min(retryDelayMs * 2, 50);
+        continue;
+      }
+
+      if (journalMode !== "wal") {
+        throw new StateTransitionError(
+          `Failed to enable SQLite WAL mode: SQLite reported journal mode '${String(journalMode)}'`,
+        );
+      }
+      return;
     }
   }
 

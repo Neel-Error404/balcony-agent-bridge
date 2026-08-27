@@ -31,15 +31,14 @@ Current truth:
 
 - the GitHub source repository is public and Apache-2.0 licensed, so anyone can
   clone, build, modify, and use it from source;
-- the npm package remains unpublished and `private: true`; there is no version
-  tag or GitHub release;
+- version `0.1.0` is approved for public npm and GitHub release distribution;
 - the generic multi-node design is locally verified, but it has not replaced
   the accepted two-machine live runtime or completed a live signed three-node
   acceptance test; and
 - the repository became public before the planned clean-export boundary was
-  reconciled. Reachable-history scanning reports no known credential patterns,
-  but operational evidence remains in public history and needs an explicit
-  owner decision before a supported release.
+  reconciled. The owner has now accepted the existing history after a dedicated
+  privacy and reachable-history review; operational evidence remains
+  intentionally public.
 
 ## Product Direction
 
@@ -139,9 +138,10 @@ leakage cases.
 Status: implemented on 2026-08-25 and merged to the public repository on
 2026-08-26. The clean-environment proof uses a disposable empty npm consumer
 and isolated empty npm cache on the current host; it does not claim validation
-on a separate operating-system image. A private security-reporting channel,
-clean-history decision, npm publication, Azure/service changes, and live signed
-multi-machine acceptance remain owner-gated.
+on a separate operating-system image. Private vulnerability reporting is
+enabled, the public history is retained by explicit owner decision, and
+`v0.1.0` is approved for npm and GitHub release publication. Azure/service
+changes and live signed multi-machine acceptance remain separately gated.
 
 - Rewrite the README around install, local demo, deploy, configure, connect,
   verify, upgrade, and recover.

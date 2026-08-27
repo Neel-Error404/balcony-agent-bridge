@@ -15,6 +15,7 @@ interface PackageManifest {
   repository?: { type?: string; url?: string };
   homepage?: string;
   bugs?: { url?: string };
+  publishConfig?: { access?: string };
 }
 
 function readPackageManifest(): PackageManifest {
@@ -24,10 +25,11 @@ function readPackageManifest(): PackageManifest {
 }
 
 describe("npm release boundary", () => {
-  it("packages only licensed compiled runtime files while publication approval is pending", () => {
+  it("packages only licensed compiled runtime files for explicit public publication", () => {
     const manifest = readPackageManifest();
 
-    expect(manifest.private).toBe(true);
+    expect(manifest.private).not.toBe(true);
+    expect(manifest.publishConfig).toEqual({ access: "public" });
     expect(manifest.license).toBe("Apache-2.0");
     expect(manifest.files).toEqual([
       "dist",
@@ -37,8 +39,8 @@ describe("npm release boundary", () => {
       "SECURITY.md",
     ]);
     expect(manifest.bin).toEqual({
-      "balcony-agent-bridge": "./dist/cli/index.js",
-      "balcony-agent-bridge-mcp": "./dist/mcp/index.js",
+      "balcony-agent-bridge": "dist/cli/index.js",
+      "balcony-agent-bridge-mcp": "dist/mcp/index.js",
     });
     expect(manifest.engines).toEqual({ node: ">=22.0.0", npm: ">=10.0.0" });
     expect(manifest.repository).toEqual({

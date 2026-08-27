@@ -63,29 +63,28 @@ private operational records into a repository that may later become public.
 
 The repository became public with `AGENTS.md`, `docs/handoff/**`,
 `docs/verification/**`, internal plans, and machine-oriented operational notes
-still reachable. The current-tree and reachable-history safety scan reports no
-known credential patterns, but that does not satisfy the planned privacy
-boundary or prove that every operational detail was intended for publication.
+still reachable. Before `v0.1.0`, the owner completed a dedicated review of the
+current tree and reachable history and accepted those records as intentionally
+public. The review found no live Azure tenant identifier, credential, private
+key, connection string, access token, non-example Service Bus hostname, or
+user-profile credential path. Public commit identities, generic machine paths,
+synthetic endpoints, and operational message identifiers remain visible.
 
-Removing files from a later commit would not remove their earlier versions.
-Before a supported release, the owner must explicitly choose one of these
-paths:
-
-1. accept the existing operational evidence as intentionally public after a
-   dedicated privacy review and revise this boundary; or
-2. create a reviewed clean export or sanitize history, understanding that this
-   changes public Git history and requires a separately approved migration.
-
-Phase 6 records this divergence but does not silently rewrite history.
+The accepted decision is to retain history. Rewriting it after publication
+would break existing clones and references without retracting copies already
+made. Reachable-history scanning remains a release gate, but it cannot prove
+the absence of every unknown secret format. A future confirmed exposure must
+be handled as an incident with credential revocation first; history rewriting
+alone is not credential remediation. The dated review record is
+`docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md`.
 
 ## Current Gate
 
-The source repository is public under Apache-2.0. The package remains marked
-`private`, which permits local tarball verification and prevents npm
-publication. No GitHub release, version tag, or npm package has been published.
-The history decision, private vulnerability-reporting channel, supported
-release, npm publication, Azure changes, and live deployment remain separate
-owner-approved actions.
+The source repository is public under Apache-2.0. Version `0.1.0` is approved
+for a public npm package and GitHub release, the existing public history is
+retained, and GitHub private vulnerability reporting is enabled. Azure and live
+service changes remain separate reviewed operations even when they use the same
+tagged source revision.
 
 The automated safety check detects private-key blocks, common cloud and SaaS
 token formats, credentialed URLs, Azure Service Bus and Storage connection
@@ -97,5 +96,6 @@ that no unknown secret format exists; manual review remains required.
 
 The owner selected the Apache License 2.0 on 2026-08-25 because its explicit
 patent grant gives infrastructure contributors and adopters clearer protection.
-The public source is governed by that license. Package publication remains
-separately owner-gated while the npm package is marked `private`.
+The public source is governed by that license. Public `0.1.0` npm publication
+is approved but is not complete until the registry returns the released
+version.

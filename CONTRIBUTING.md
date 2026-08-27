@@ -1,8 +1,8 @@
 # Contributing
 
-Balcony Agent Bridge is a public source alpha under Apache-2.0. The current npm
-package remains unpublished and `private: true`; contributors build and test
-from source while the supported-release gates are completed.
+Balcony Agent Bridge is a public `0.1.0` alpha under Apache-2.0. The npm package
+contains the runtime CLI and MCP entrypoints; contributors build and test the
+complete project from source.
 
 ## Local Setup
 
