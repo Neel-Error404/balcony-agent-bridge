@@ -40,7 +40,25 @@ npm install --global balcony-agent-bridge@0.1.0
 if ($LASTEXITCODE -ne 0) {
   throw "Unable to install balcony-agent-bridge@0.1.0 from the npm registry; registry installation is unavailable."
 }
-balcony-agent-bridge --help
+$globalNodeModules = npm root --global
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($globalNodeModules)) {
+  throw "Unable to resolve the global npm package directory; registry installation is unavailable."
+}
+$packageDirectory = Join-Path $globalNodeModules "balcony-agent-bridge"
+$packageManifest = Join-Path $packageDirectory "package.json"
+if (-not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {
+  throw "The installed balcony-agent-bridge package manifest is missing; registry installation is unavailable."
+}
+$installedPackage = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json
+if ($installedPackage.version -ne "0.1.0") {
+  throw "The installed balcony-agent-bridge version is not 0.1.0; registry installation is unavailable."
+}
+$installedCli = Join-Path $packageDirectory "dist/cli/index.js"
+if (-not (Test-Path -LiteralPath $installedCli -PathType Leaf)) {
+  throw "The installed balcony-agent-bridge@0.1.0 CLI entrypoint is missing; registry installation is unavailable."
+}
+$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop).Path
+& $nodePath $installedCli --help
 if ($LASTEXITCODE -ne 0) {
   throw "The installed balcony-agent-bridge@0.1.0 CLI did not start; registry installation is unavailable."
 }
