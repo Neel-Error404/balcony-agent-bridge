@@ -26,10 +26,11 @@ the smaller static design.
 - `doctor --check-transport` proves only that a sender link can be opened. A
   real peer is required for end-to-end delivery validation.
 - Upgrade and rollback are operator-run. Database migrations are forward-only,
-  downgrade after schema-v7 signed-ingress provenance is unsupported, and there is
-  no automatic package updater. Schema v6 quarantines pending legacy inbox
-  work; schema v7 marks all remaining legacy inbox rows as unauthenticated so
-  they cannot authorize new continuation work.
+  downgrade after schema-v8 resource authorization is unsupported, and there
+  is no automatic package updater. Schema v6 quarantines pending legacy inbox
+  work; schema v7 marks all remaining legacy inbox rows as unauthenticated, and
+  schema v8 creates empty resource/grant tables so existing peers receive no
+  implicit project access.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
   it is not evidence from a separate clean OS/VM. Version `0.1.0` is the
   approved public alpha package and GitHub release target, not a
@@ -62,8 +63,8 @@ the smaller static design.
   descriptions are body-free.
 - `peer_readable: true` approves a complete registered project tree. Read-only
   prevents mutation, not disclosure of secrets already present in that tree.
-- Dispatcher project approval is not scoped per originating peer: every
-  authorized peer can request any project marked `peer_readable: true`.
+  Per-peer grants limit which authenticated peer can request that tree, but
+  they do not provide file-level filtering within it.
 - A local administrator or the service account can access runtime material and
   can weaken filesystem ACLs after installation.
 - Filesystem validation and later use are separate operations; a local

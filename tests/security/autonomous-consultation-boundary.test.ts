@@ -31,7 +31,7 @@ describe("autonomous consultation safety controls", () => {
   it("stops a consultation after its durable timeout", async () => {
     const harness = createHarness({ runTimeoutSeconds: 30 });
     const request = incomingRequest();
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
 
     await harness.coordinator.runOnce(now(31));
 
@@ -74,7 +74,7 @@ describe("autonomous consultation safety controls", () => {
       },
       now: now(0),
     });
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
 
     expect(await harness.coordinator.runOnce(now(31))).toBe(1);
     expect(harness.database.getInboxMessage(request.message_id)?.state).toBe(
@@ -96,7 +96,7 @@ describe("autonomous consultation safety controls", () => {
       rootRequestId: "11111111-1111-4111-8111-111111111111",
       parentRequestId: "22222222-2222-4222-8222-222222222222",
     });
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(peerNeed());
 
     await harness.coordinator.runOnce(now(1));
@@ -119,7 +119,7 @@ describe("autonomous consultation safety controls", () => {
   it("detects a peer-request cycle before enqueueing it", async () => {
     const harness = createHarness();
     const request = incomingRequest();
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(
       result({
         outcome: "needs_information",
@@ -148,7 +148,7 @@ describe("autonomous consultation safety controls", () => {
   it("stops instead of executing beyond the round limit", async () => {
     const harness = createHarness({ maxRounds: 1 });
     const request = incomingRequest();
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(
       result({
         outcome: "needs_information",
@@ -181,7 +181,7 @@ describe("autonomous consultation safety controls", () => {
   it("ignores a peer result outside the correlated nested conversation", async () => {
     const harness = createHarness();
     const request = incomingRequest();
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(peerNeed());
 
     await harness.coordinator.runOnce(now(1));
@@ -217,6 +217,7 @@ describe("autonomous consultation safety controls", () => {
       wrongConversationResult,
       1,
       now(3),
+      true,
     );
 
     await harness.coordinator.runOnce(now(8));
@@ -255,7 +256,7 @@ describe("autonomous consultation safety controls", () => {
       },
       now: now(0),
     });
-    harness.database.persistIncoming(request, 1, now(0));
+    harness.database.persistIncoming(request, 1, now(0), true);
 
     expect(await harness.coordinator.runOnce(now(1))).toBe(1);
     expect(harness.database.getInboxMessage(request.message_id)?.state).toBe(
@@ -304,6 +305,8 @@ describe("autonomous consultation safety controls", () => {
       }),
     );
     const database = new BridgeDatabase(databasePath);
+    database.registerResource("balcony-agent-bridge");
+    database.grantPeerResource("SYS-A", "balcony-agent-bridge");
     const executor = new SecurityExecutor();
     let coordinator: AutonomousConsultationCoordinator;
     try {

@@ -166,7 +166,7 @@ proves Azure connectivity.
 ## Configure A Node
 
 Choose one stable lowercase node ID and the complete list of remote nodes this
-machine may contact. Setup creates a private local JSON profile plus a v7
+machine may contact. Setup creates a private local JSON profile plus a v8
 SQLite database:
 
 ```powershell
@@ -384,11 +384,34 @@ Read `docs/architecture.md`, `docs/threat-model.md`,
 ## Optional Read-Only Dispatch
 
 The dispatcher maps stable project keys to machine-local allowlisted
-directories. `peer_readable: true` authorizes the whole configured project
-tree for an authorized peer. Read-only execution prevents mutation; it is not
-a confidentiality boundary. Never register a project that contains local
-credentials, private keys, connection material, or files that peer may not
-read.
+directories. `peer_readable: true` makes a project eligible for dispatch, but
+it does not authorize any peer. Every receiving node must also register the
+same project key as a durable resource and create an explicit grant for each
+peer allowed to inspect it:
+
+```powershell
+$env:BALCONY_SYSTEM_ID = "build-node"
+& $nodePath $bridgeCli resource register `
+  --config C:\absolute\path\config.json `
+  --resource-id balcony-agent-bridge
+& $nodePath $bridgeCli grant create `
+  --config C:\absolute\path\config.json `
+  --peer-id laptop-a `
+  --resource-id balcony-agent-bridge
+& $nodePath $bridgeCli resource list --config C:\absolute\path\config.json
+& $nodePath $bridgeCli grant list --config C:\absolute\path\config.json
+```
+
+Resource IDs are normalized to lowercase and must match the project key in the
+machine-local dispatcher registry. Existing databases migrate to schema v8
+with no resources or grants, so the migration is deny-by-default. Use
+`grant revoke` to remove one peer/resource grant and `resource disable` to
+suspend all grants for one resource. A revoked grant is retained durably; it is
+not deleted.
+
+Read-only execution prevents mutation; it is not a confidentiality boundary.
+Never register a project that contains local credentials, private keys,
+connection material, or files that an explicitly granted peer may not read.
 
 The dispatcher is configured separately from MCP and the bridge. It is not
 required for direct human-consumed bridge messages. See

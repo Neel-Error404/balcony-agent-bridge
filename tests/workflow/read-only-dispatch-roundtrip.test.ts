@@ -58,6 +58,8 @@ describe("read-only dispatch round trip", () => {
 
     const sysADatabase = createDatabase(path.join(root, "sys-a.sqlite3"));
     const sysBDatabase = createDatabase(path.join(root, "sys-b.sqlite3"));
+    sysBDatabase.registerResource("voiceai");
+    sysBDatabase.grantPeerResource("SYS-A", "voiceai");
     const sysATransport = new FakeBridgeTransport();
     const sysBTransport = new FakeBridgeTransport();
     const sysAConfig = bridgeConfig("SYS-A", path.join(root, "sys-a.sqlite3"));

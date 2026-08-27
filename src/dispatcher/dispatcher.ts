@@ -103,6 +103,17 @@ export class ReadOnlyDispatcher {
         claim.envelope,
         this.config.defaultTimeoutSeconds,
       );
+      if (
+        !claim.authenticatedIngress ||
+        !this.database.isPeerAuthorizedForResource(
+          claim.envelope.origin_system,
+          task.project,
+        )
+      ) {
+        throw new DispatchRejectedError(
+          "The requested resource is not authorized for this peer.",
+        );
+      }
       const project = this.projects.get(task.project);
       if (!project) {
         throw new DispatchRejectedError(

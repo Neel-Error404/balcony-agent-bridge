@@ -56,6 +56,8 @@ describe("AutonomousConsultationCoordinator", () => {
     );
     registry = ProjectRegistry.load(registryPath);
     database = new BridgeDatabase(path.join(root, "bridge.sqlite3"));
+    database.registerResource("balcony-agent-bridge");
+    database.grantPeerResource("SYS-A", "balcony-agent-bridge");
     executor = new QueuedCodexExecutor();
     coordinator = createCoordinator();
   });
@@ -67,7 +69,7 @@ describe("AutonomousConsultationCoordinator", () => {
 
   it("parks local evidence needs durably and resumes to completion", async () => {
     const request = incomingRequest();
-    database.persistIncoming(request, 1, now(0));
+    database.persistIncoming(request, 1, now(0), true);
     executor.outputs.push(
       childResult({
         outcome: "needs_information",
@@ -145,7 +147,7 @@ describe("AutonomousConsultationCoordinator", () => {
 
   it("creates a correlated nested peer request and resumes from its result", async () => {
     const request = incomingRequest();
-    database.persistIncoming(request, 1, now(0));
+    database.persistIncoming(request, 1, now(0), true);
     executor.outputs.push(
       childResult({
         outcome: "needs_information",
@@ -264,7 +266,7 @@ describe("AutonomousConsultationCoordinator", () => {
 
   it("preserves pinned Git snapshot metadata when evidence is merged", async () => {
     const request = incomingRequest();
-    database.persistIncoming(request, 1, now(0));
+    database.persistIncoming(request, 1, now(0), true);
     executor.outputs.push(
       childResult({
         outcome: "needs_information",
@@ -316,7 +318,7 @@ describe("AutonomousConsultationCoordinator", () => {
     const request = incomingRequest();
     const start = now(1);
     let current = start;
-    database.persistIncoming(request, 1, now(0));
+    database.persistIncoming(request, 1, now(0), true);
     const expiringExecutor = new ClockAdvancingExecutor(() => {
       current = new Date(start.getTime() + 721_000);
     });

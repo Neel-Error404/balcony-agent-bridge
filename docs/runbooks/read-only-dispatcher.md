@@ -28,7 +28,26 @@ Copy the shape of `config/dispatcher-projects.example.json` to a machine-local
 path and add only approved local repositories. Project keys must be stable
 across SYS-A and SYS-B, but paths remain machine-specific and must never be
 sent through the bridge. Every enabled entry must set `peer_readable: true`.
-That flag approves the entire project tree for peer inspection.
+That flag makes the path eligible; it does not authorize a peer.
+
+Before starting the dispatcher, register the project key as a durable resource
+and grant only the intended peer/resource pairs against the shared profile and
+SQLite database:
+
+```powershell
+$env:BALCONY_SYSTEM_ID = "SYS-B"
+& $nodePath $bridgeCli resource register --config C:\absolute\config.json --resource-id balcony-agent-bridge
+& $nodePath $bridgeCli grant create --config C:\absolute\config.json --peer-id SYS-A --resource-id balcony-agent-bridge
+& $nodePath $bridgeCli resource list --config C:\absolute\config.json
+& $nodePath $bridgeCli grant list --config C:\absolute\config.json
+```
+
+Existing v0.1 databases migrate to schema v8 with empty authorization tables.
+No project or peer is granted automatically. A request is eligible only when
+it arrived through authenticated ingress, the resource is enabled, and the
+exact peer/resource grant is active. Use `grant revoke` for one pair or
+`resource disable` for an immediate all-peer stop on that resource. Restart and
+recovery re-evaluate the durable policy before resource access.
 
 Do not register projects containing local `.env` files, private keys,
 connection files, credential caches, private certificates, `vms.yaml`, or
@@ -87,11 +106,13 @@ foreground `dist/bridge/index.js` process running beside the Windows service.
 1. Build the repository.
 2. Start `npm run start:dispatcher` under the intended Windows user.
 3. Confirm the dispatcher heartbeat appears in `bridge:status`.
-4. Send one explicitly routed read-only request for an allowlisted test
-   project.
+4. Register the test resource, grant the exact requesting peer, then send one
+   explicitly routed read-only request for that project.
 5. Confirm exactly one `task_result` is returned.
 6. Confirm the repository worktree and tracked file hashes did not change.
-7. Repeat with an unknown project and confirm terminal rejection.
+7. Repeat without a grant, after revocation, with a disabled resource, and with
+   an unknown project; confirm terminal rejection without project-path or
+   resource-content disclosure.
 8. Repeat with a forced timeout and confirm the child process tree stops.
 9. Stop the dispatcher, queue a request, restart it, and confirm recovery.
 10. Run a long request and confirm claim renewal.

@@ -12,6 +12,7 @@ import {
   loadConfigFile,
 } from "../config.js";
 import { NodeIdSchema } from "../contracts/envelope.js";
+import { ResourceIdSchema } from "../contracts/resource-authorization.js";
 import { generateNodeIdentity } from "../security/node-identity.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
 import { setupLocalProfile } from "../setup/local-profile.js";
@@ -27,6 +28,8 @@ Commands:
   setup     Create an idempotent local node profile and SQLite database
   doctor    Diagnose the runtime, profile, database, and optional transport
   status    Print local durable bridge status as JSON
+  resource  Register, list, enable, or disable local resources
+  grant     Create, list, or revoke per-peer resource grants
   help      Show this help message
 
 Common options:
@@ -47,6 +50,17 @@ Setup options:
 Identity options:
   --node-id <id>                 Stable identifier for this node (required)
   --output-directory <path>      Absolute directory for new identity files
+
+Resource options:
+  resource register --resource-id <id> [--config <absolute-path>]
+  resource list [--config <absolute-path>]
+  resource enable --resource-id <id> [--config <absolute-path>]
+  resource disable --resource-id <id> [--config <absolute-path>]
+
+Grant options:
+  grant create --peer-id <id> --resource-id <id> [--config <absolute-path>]
+  grant list [--peer-id <id>] [--config <absolute-path>]
+  grant revoke --peer-id <id> --resource-id <id> [--config <absolute-path>]
 
 Examples:
   balcony-agent-bridge demo
@@ -83,6 +97,12 @@ async function main(): Promise<void> {
         return;
       case "status":
         runStatus(process.argv.slice(3));
+        return;
+      case "resource":
+        runResource(process.argv.slice(3));
+        return;
+      case "grant":
+        runGrant(process.argv.slice(3));
         return;
       default:
         throw new CliUsageError(`Unknown command: ${command}`);
@@ -275,6 +295,137 @@ function runStatus(args: readonly string[]): void {
   } finally {
     database.close();
   }
+}
+
+function runResource(args: readonly string[]): void {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      config: { type: "string" },
+      "resource-id": { type: "string" },
+    },
+  });
+  if (positionals.length !== 1) {
+    throw new CliUsageError("resource requires exactly one action");
+  }
+  const action = positionals[0]!;
+  if (!["register", "list", "enable", "disable"].includes(action)) {
+    throw new CliUsageError("invalid resource action");
+  }
+  if (action === "list" && values["resource-id"]) {
+    throw new CliUsageError("resource list does not accept --resource-id");
+  }
+  if (action !== "list" && !values["resource-id"]) {
+    throw new CliUsageError(`${action} requires --resource-id`);
+  }
+
+  const config = loadCliConfig(values.config);
+  const database = new BridgeDatabase(config.databasePath);
+  try {
+    if (action === "list") {
+      writeJson({
+        resources: database.listResources().map(formatResource),
+      });
+      return;
+    }
+    const resourceId = ResourceIdSchema.parse(values["resource-id"]);
+    const resource = action === "register"
+      ? database.registerResource(resourceId)
+      : database.setResourceEnabled(resourceId, action === "enable");
+    writeJson({ ok: true, resource: formatResource(resource) });
+  } finally {
+    database.close();
+  }
+}
+
+function runGrant(args: readonly string[]): void {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      config: { type: "string" },
+      "peer-id": { type: "string" },
+      "resource-id": { type: "string" },
+    },
+  });
+  if (positionals.length !== 1) {
+    throw new CliUsageError("grant requires exactly one action");
+  }
+  const action = positionals[0]!;
+  if (!["create", "list", "revoke"].includes(action)) {
+    throw new CliUsageError("invalid grant action");
+  }
+  if (action === "list" && values["resource-id"]) {
+    throw new CliUsageError("grant list does not accept --resource-id");
+  }
+  if (action !== "list" && (!values["peer-id"] || !values["resource-id"])) {
+    throw new CliUsageError(`${action} requires --peer-id and --resource-id`);
+  }
+
+  const config = loadCliConfig(values.config);
+  const peerId = values["peer-id"]
+    ? NodeIdSchema.parse(values["peer-id"])
+    : undefined;
+  if (peerId && !config.authorizedNodeIds.includes(peerId)) {
+    throw new CliUsageError("--peer-id must be an authorized remote node");
+  }
+  const database = new BridgeDatabase(config.databasePath);
+  try {
+    if (action === "list") {
+      writeJson({
+        grants: database.listPeerResourceGrants(peerId).map(formatGrant),
+      });
+      return;
+    }
+    const resourceId = ResourceIdSchema.parse(values["resource-id"]);
+    const grant = action === "create"
+      ? database.grantPeerResource(peerId!, resourceId)
+      : database.revokePeerResource(peerId!, resourceId);
+    writeJson({ ok: true, grant: formatGrant(grant) });
+  } finally {
+    database.close();
+  }
+}
+
+function loadCliConfig(configPathValue?: string) {
+  const config = configPathValue
+    ? loadConfigFile(requireAbsolute(configPathValue, "--config"))
+    : loadConfig();
+  assertSystemIdMatchesProcessIdentity(config.systemId);
+  return config;
+}
+
+function formatResource(resource: {
+  resourceId: string;
+  enabled: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}): Record<string, unknown> {
+  return {
+    resource_id: resource.resourceId,
+    enabled: resource.enabled,
+    created_at_utc: resource.createdAtUtc,
+    updated_at_utc: resource.updatedAtUtc,
+  };
+}
+
+function formatGrant(grant: {
+  peerSystemId: string;
+  resourceId: string;
+  state: string;
+  grantedAtUtc: string;
+  revokedAtUtc?: string;
+}): Record<string, unknown> {
+  return {
+    peer_id: grant.peerSystemId,
+    resource_id: grant.resourceId,
+    state: grant.state,
+    granted_at_utc: grant.grantedAtUtc,
+    ...(grant.revokedAtUtc ? { revoked_at_utc: grant.revokedAtUtc } : {}),
+  };
 }
 
 function requireAbsolute(value: string, optionName: string): string {
