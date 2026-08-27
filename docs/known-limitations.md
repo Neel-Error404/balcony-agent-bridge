@@ -38,7 +38,7 @@ the smaller static design.
   the local OS/process identity boundary; signer key IDs are not retained as a
   separate inbox audit field.
 - Current clean-consumer proof uses an isolated npm cache on the current host;
-  it is not evidence from a separate clean OS/VM. Version `0.1.0` is the
+  it is not evidence from a separate clean OS/VM. Version `0.2.0` is the
   approved public alpha package and GitHub release target, not a
   production-service support promise; registry and release availability must
   be verified independently.

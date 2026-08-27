@@ -31,7 +31,7 @@ Current truth:
 
 - the GitHub source repository is public and Apache-2.0 licensed, so anyone can
   clone, build, modify, and use it from source;
-- version `0.1.0` is approved for public npm and GitHub release distribution;
+- version `0.2.0` is the approved Phase 2 npm and GitHub prerelease target;
 - the generic multi-node design is locally verified, but it has not replaced
   the accepted two-machine live runtime or completed a live signed three-node
   acceptance test; and
@@ -181,9 +181,9 @@ Azure or live services.
 
 ## Phase 2A: Per-Peer Resource Authorization
 
-Status: implemented and locally verified on an uncommitted development branch
-on 2026-08-27. It is not part of the published `v0.1.0` npm/GitHub artifact and
-has not been deployed to either operational node.
+Status: implemented, reviewed, and merged through PR #9 as `c78c172e` on
+2026-08-27. It is included in the `v0.2.0` release candidate and has not been
+deployed to either operational node.
 
 - Add an additive SQLite resource registry and exact peer/resource grants.
 - Require authenticated ingress, an enabled resource, and an active exact
@@ -197,14 +197,15 @@ has not been deployed to either operational node.
 - Preserve the v0.1 signed envelope and transport wire formats.
 
 Exit: focused deny/grant/revoke tests and the full local verification ladder
-pass, including migration, recovery, signed-boundary, and clean package checks.
-Git delivery, publication, and operational rollout remain owner-gated.
+passed, including migration, recovery, signed-boundary, and clean package
+checks. Git delivery is complete; publication and operational rollout remain
+separate gates.
 
 ## Phase 2B: Local Approval Workflow
 
-Status: implemented and locally verified on an uncommitted development branch
-on 2026-08-27. It is not part of the published `v0.1.0` npm/GitHub artifact and
-has not been deployed to either operational node.
+Status: implemented, reviewed, and merged through PR #10 as `23952cba` on
+2026-08-27. It is included in the `v0.2.0` release candidate and has not been
+deployed to either operational node.
 
 - Add schema-v9 SQLite approval requests and append-only metadata audit records.
 - Create a pending request only for authenticated claims to known enabled
@@ -221,8 +222,8 @@ has not been deployed to either operational node.
   Azure transport, or live service state.
 
 Exit: restart, strict-expiry, replay, migration, and multi-connection decision
-tests pass. Git delivery, publication, deployment, and live operation remain
-owner-gated.
+tests passed. Git delivery is complete; publication, deployment, and live
+operation remain separate gates.
 
 ## Deferred Until Demand Is Proven
 
