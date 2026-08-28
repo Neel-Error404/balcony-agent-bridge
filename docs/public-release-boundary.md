@@ -16,6 +16,8 @@ small:
 - `package.json`;
 - `README.md`;
 - `SECURITY.md`;
+- the explicitly allowlisted onboarding, security, configuration, and runbook
+  documents referenced by the packaged README and onboarding guide;
 - an owner-approved `LICENSE` and optional `NOTICE` when they exist.
 
 Source, tests, infrastructure, service-installation scripts, environment
@@ -80,11 +82,12 @@ alone is not credential remediation. The dated review record is
 
 ## Current Gate
 
-The source repository is public under Apache-2.0. Version `0.2.0` is approved
-for a public npm package and GitHub release, the existing public history is
-retained, and GitHub private vulnerability reporting is enabled. Azure and live
-service changes remain separate reviewed operations even when they use the same
-tagged source revision.
+The source repository is public under Apache-2.0. Version `0.2.0` is the
+current public npm/GitHub baseline; `0.3.0` is the reviewed npm-first onboarding
+release candidate until exact registry and release verification completes. The
+existing public history is retained, and GitHub private vulnerability reporting
+is enabled. Azure and live service changes remain separate reviewed operations
+even when they use the same tagged source revision.
 
 The automated safety check detects private-key blocks, common cloud and SaaS
 token formats, credentialed URLs, Azure Service Bus and Storage connection
@@ -96,6 +99,6 @@ that no unknown secret format exists; manual review remains required.
 
 The owner selected the Apache License 2.0 on 2026-08-25 because its explicit
 patent grant gives infrastructure contributors and adopters clearer protection.
-The public source is governed by that license. Public `0.2.0` npm publication
-is approved but is not complete until the registry returns the released
-version.
+The public source is governed by that license. A candidate becomes released
+only after the registry returns the exact published version and the downloaded
+artifact matches the frozen tarball byte for byte.

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +19,27 @@ import { ResourceIdSchema } from "../contracts/resource-authorization.js";
 import { StateTransitionError } from "../errors.js";
 import { generateNodeIdentity } from "../security/node-identity.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
+import { runPreflight } from "../onboarding/preflight.js";
+import {
+  exportOnboardingEnrollment,
+  generateOnboardingIdentity,
+  importPublicEnrollment,
+  readOnboardingManifest,
+  resumeOnboarding,
+  startOnboarding,
+  statusOnboarding,
+  writeMembershipPolicy,
+} from "../onboarding/index.js";
+import {
+  configureDispatcher,
+  configureMcp,
+  configureTransport,
+  readRuntimeSettings,
+} from "../onboarding/runtime-settings.js";
+import {
+  buildBridgeLaunch,
+  buildDispatcherLaunch,
+} from "../onboarding/foreground-runtime.js";
 import { setupLocalProfile } from "../setup/local-profile.js";
 import { BridgeDatabase } from "../storage/database.js";
 import { runDoctor } from "./doctor.js";
@@ -33,6 +56,9 @@ Commands:
   resource  Register, list, enable, or disable local resources
   grant     Create, list, or revoke per-peer resource grants
   approval  List and decide durable peer resource approval requests
+  preflight Check npm-first local prerequisites without installing anything
+  onboard   Prepare and verify resumable npm-first onboarding artifacts
+  runtime   Run or validate the supported foreground bridge and dispatcher
   help      Show this help message
 
 Common options:
@@ -81,6 +107,47 @@ Examples:
   balcony-agent-bridge doctor --config C:\\path\\to\\config.json
 `;
 
+const commandUsages: Readonly<Record<string, string>> = {
+  identity: `Usage: balcony-agent-bridge identity --node-id <id> --output-directory <absolute-path>\n`,
+  setup: `Usage: balcony-agent-bridge setup --node-id <id> --authorized-node <id> [--authorized-node <id>...] [options]\n`,
+  doctor: `Usage: balcony-agent-bridge doctor [--config <absolute-path>] [--check-transport]\n`,
+  status: `Usage: balcony-agent-bridge status [--config <absolute-path>]\n`,
+  resource: `Usage: balcony-agent-bridge resource <register|list|enable|disable> [options]\n`,
+  grant: `Usage: balcony-agent-bridge grant <create|list|revoke> [options]\n`,
+  approval: `Usage: balcony-agent-bridge approval <list|show|approve-once|approve-temporary|deny|revoke|audit> [options]\n`,
+  preflight: `Usage: balcony-agent-bridge preflight --root <absolute-path>\n`,
+  onboard: `Usage: balcony-agent-bridge onboard <action> [options]
+
+Actions:
+  start                  Create or resume a node (--root, --node-id, --network-id, --peer-id)
+  status                 Inspect artifacts and runtime state (--root)
+  export-enrollment      Write public enrollment only (--root, --output)
+  import-peer            Import one expected public peer (--root, --peer-id, --enrollment)
+  configure-transport    Create local profile/database (--root, exactly one of --local-only or --servicebus-namespace)
+  configure-dispatcher   Pin Codex and one readable project (--root, --project-key, --project-path)
+  configure-mcp          Register MCP in the dedicated Codex home (--root)
+  verify                 Revalidate the complete local onboarding state (--root)
+
+Run balcony-agent-bridge onboard <action> --help for exact options.
+`,
+  "onboard:start": `Usage: balcony-agent-bridge onboard start --root <absolute-path> --node-id <id> --network-id <id> --peer-id <id> [--peer-id <id>...]\n`,
+  "onboard:status": `Usage: balcony-agent-bridge onboard status --root <absolute-path>\n`,
+  "onboard:export-enrollment": `Usage: balcony-agent-bridge onboard export-enrollment --root <absolute-path> --output <absolute-json-path>\n`,
+  "onboard:import-peer": `Usage: balcony-agent-bridge onboard import-peer --root <absolute-path> --peer-id <id> --enrollment <absolute-json-path>\n`,
+  "onboard:configure-transport": `Usage: balcony-agent-bridge onboard configure-transport --root <absolute-path> (--local-only | --servicebus-namespace <host>) [--topic <name>] [--subscription <name>] [--auth-mode <mode>]\n`,
+  "onboard:configure-dispatcher": `Usage: balcony-agent-bridge onboard configure-dispatcher --root <absolute-path> --project-key <key> --project-path <absolute-path> [--codex-executable <absolute-path> --code-mode-host-executable <absolute-path>]\n`,
+  "onboard:configure-mcp": `Usage: balcony-agent-bridge onboard configure-mcp --root <absolute-path> [--codex-executable <pinned-absolute-path>]\n`,
+  "onboard:verify": `Usage: balcony-agent-bridge onboard verify --root <absolute-path>\n`,
+  runtime: `Usage: balcony-agent-bridge runtime <bridge|dispatcher> --root <absolute-path> [--validate]
+
+  bridge       Run the signed Azure transport in the foreground after owner-provisioned topology exists
+  dispatcher   Run the read-only Codex dispatcher in the foreground
+  --validate   Validate configuration and exit without entering a runtime loop
+`,
+  "runtime:bridge": `Usage: balcony-agent-bridge runtime bridge --root <absolute-path> [--validate]\n`,
+  "runtime:dispatcher": `Usage: balcony-agent-bridge runtime dispatcher --root <absolute-path> [--validate]\n`,
+};
+
 class CliUsageError extends Error {}
 
 await main();
@@ -89,6 +156,21 @@ async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === undefined || command === "help" || command === "--help") {
     process.stdout.write(usage);
+    return;
+  }
+  if (command === "--version" || command === "-v") {
+    process.stdout.write(`${readPackageVersion()}\n`);
+    return;
+  }
+  if (process.argv.at(-1) === "--help") {
+    const action = process.argv.length === 5 ? process.argv[3] : undefined;
+    const commandUsage = commandUsages[action ? `${command}:${action}` : command];
+    if (commandUsage === undefined) {
+      process.stderr.write(`${usage}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    process.stdout.write(commandUsage);
     return;
   }
 
@@ -119,12 +201,21 @@ async function main(): Promise<void> {
       case "approval":
         runApproval(process.argv.slice(3));
         return;
+      case "preflight":
+        runPreflightCommand(process.argv.slice(3));
+        return;
+      case "onboard":
+        runOnboard(process.argv.slice(3));
+        return;
+      case "runtime":
+        runForegroundRuntime(process.argv.slice(3));
+        return;
       default:
         throw new CliUsageError(`Unknown command: ${command}`);
     }
   } catch (error) {
     if (error instanceof CliUsageError || isParseArgsError(error)) {
-      process.stderr.write(`${usage}\n`);
+      process.stderr.write(`${commandUsages[command] ?? usage}\n`);
       process.exitCode = 2;
       return;
     }
@@ -133,6 +224,476 @@ async function main(): Promise<void> {
     );
     process.exitCode = 1;
   }
+}
+
+function runPreflightCommand(args: readonly string[]): void {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: { root: { type: "string" } },
+  });
+  if (positionals.length > 0 || !values.root) {
+    throw new CliUsageError("preflight requires --root");
+  }
+  const report = runPreflight({
+    pilotRoot: requireAbsolute(values.root, "--root"),
+  });
+  writeJson(report);
+  process.exitCode = report.ok ? 0 : 1;
+}
+
+function runOnboard(args: readonly string[]): void {
+  const action = args[0];
+  if (!action) throw new CliUsageError("onboard requires an action");
+  const { values, positionals } = parseArgs({
+    args: args.slice(1),
+    allowPositionals: true,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      root: { type: "string" },
+      "node-id": { type: "string" },
+      "network-id": { type: "string" },
+      "peer-id": { type: "string", multiple: true },
+      enrollment: { type: "string" },
+      output: { type: "string" },
+      "servicebus-namespace": { type: "string" },
+      topic: { type: "string" },
+      subscription: { type: "string" },
+      "auth-mode": { type: "string" },
+      "local-only": { type: "boolean" },
+      "managed-identity-client-id": { type: "string" },
+      "azure-tenant-id": { type: "string" },
+      "azure-client-id": { type: "string" },
+      "azure-client-certificate-path": { type: "string" },
+      "project-key": { type: "string" },
+      "project-path": { type: "string" },
+      "codex-executable": { type: "string" },
+      "code-mode-host-executable": { type: "string" },
+    },
+  });
+  if (positionals.length > 0) {
+    throw new CliUsageError("onboard does not accept extra positional arguments");
+  }
+  if (values.help) {
+    process.stdout.write(`${commandUsages["onboard"]}Action: ${action}\n`);
+    return;
+  }
+  if (!values.root) throw new CliUsageError("onboard requires --root");
+  const root = requireAbsolute(values.root, "--root");
+  const manifestPath = path.join(root, "onboarding-manifest.json");
+
+  switch (action) {
+    case "start": {
+      if (!values["node-id"] || !values["network-id"] || !values["peer-id"]?.length) {
+        throw new CliUsageError(
+          "onboard start requires --node-id, --network-id, and at least one --peer-id",
+        );
+      }
+      const nodeId = NodeIdSchema.parse(values["node-id"]);
+      const peerIds = values["peer-id"].map((value) => NodeIdSchema.parse(value));
+      if (new Set(peerIds).size !== peerIds.length) {
+        throw new CliUsageError("onboard start peer IDs must be unique");
+      }
+      peerIds.sort();
+      const manifest = startOnboarding({
+        root,
+        nodeId,
+        processIdentity: process.env["BALCONY_SYSTEM_ID"],
+        networkId: values["network-id"],
+        authorizedNodeIds: peerIds,
+      });
+      const withIdentity = generateOnboardingIdentity({
+        manifestPath: manifest.manifestPath,
+      });
+      writeJson({
+        ok: true,
+        status: withIdentity.status,
+        node_id: withIdentity.node_id,
+        network_id: withIdentity.network_id,
+        authorized_node_ids: withIdentity.authorized_node_ids,
+        manifest_path: withIdentity.manifestPath,
+        enrollment_path: withIdentity.local_enrollment_path,
+        key_id: withIdentity.local_enrollment?.key_id,
+      });
+      return;
+    }
+    case "status": {
+      const report = statusOnboarding(manifestPath);
+      const runtime = report.status === "blocked"
+        ? undefined
+        : readRuntimeSettings(manifestPath);
+      writeJson({ ...report, ...(runtime ? { runtime } : {}) });
+      process.exitCode = report.status === "blocked" ? 1 : 0;
+      return;
+    }
+    case "export-enrollment": {
+      if (!values.output) {
+        throw new CliUsageError("export-enrollment requires --output");
+      }
+      const exported = exportOnboardingEnrollment(
+        manifestPath,
+        requireAbsolute(values.output, "--output"),
+      );
+      writeJson({
+        ok: true,
+        output_path: exported.outputPath,
+        node_id: exported.enrollment.node_id,
+        key_id: exported.enrollment.key_id,
+      });
+      return;
+    }
+    case "import-peer": {
+      if (!values.enrollment || values["peer-id"]?.length !== 1) {
+        throw new CliUsageError(
+          "import-peer requires one --peer-id and --enrollment",
+        );
+      }
+      const updated = importPublicEnrollment({
+        manifestPath,
+        inputPath: requireAbsolute(values.enrollment, "--enrollment"),
+        expectedPeerId: NodeIdSchema.parse(values["peer-id"][0]),
+      });
+      const allImported = updated.authorized_node_ids.every((peerId) =>
+        Boolean(updated.enrollments[peerId])
+      );
+      if (allImported) writeMembershipPolicy(manifestPath);
+      const report = resumeOnboarding(manifestPath);
+      writeJson({
+        ok: true,
+        imported_peer_id: values["peer-id"][0],
+        status: report.status,
+        membership_ready: Boolean(report.artifacts["membership"]?.present),
+      });
+      return;
+    }
+    case "configure-transport": {
+      const authMode = values["auth-mode"] ?? "managed_identity";
+      if (!isAzureAuthMode(authMode)) {
+        throw new CliUsageError("--auth-mode must be managed_identity or client_certificate");
+      }
+      const settings = configureTransport({
+        manifestPath,
+        packageRoot: installedPackageRoot(),
+        authMode,
+        localOnly: values["local-only"] ?? false,
+        ...(values.topic ? { topicName: values.topic } : {}),
+        ...(values.subscription ? { subscriptionName: values.subscription } : {}),
+        ...(values["servicebus-namespace"]
+          ? { serviceBusNamespace: values["servicebus-namespace"] }
+          : {}),
+        ...(values["managed-identity-client-id"]
+          ? { managedIdentityClientId: values["managed-identity-client-id"] }
+          : {}),
+        ...(values["azure-tenant-id"]
+          ? { azureTenantId: values["azure-tenant-id"] }
+          : {}),
+        ...(values["azure-client-id"]
+          ? { azureClientId: values["azure-client-id"] }
+          : {}),
+        ...(values["azure-client-certificate-path"]
+          ? { azureClientCertificatePath: values["azure-client-certificate-path"] }
+          : {}),
+      });
+      writeJson({ ok: true, transport: settings.transport });
+      return;
+    }
+    case "configure-dispatcher": {
+      if (!values["project-key"] || !values["project-path"]) {
+        throw new CliUsageError(
+          "configure-dispatcher requires --project-key and --project-path",
+        );
+      }
+      if (
+        Boolean(values["codex-executable"]) !==
+        Boolean(values["code-mode-host-executable"])
+      ) {
+        throw new CliUsageError(
+          "--codex-executable and --code-mode-host-executable must be supplied together",
+        );
+      }
+      const discovered = values["codex-executable"] &&
+          values["code-mode-host-executable"]
+        ? undefined
+        : discoverCodexBinaries();
+      const settings = configureDispatcher({
+        manifestPath,
+        projectKey: values["project-key"],
+        projectPath: requireAbsolute(values["project-path"], "--project-path"),
+        codexExecutable: values["codex-executable"]
+          ? requireAbsolute(values["codex-executable"], "--codex-executable")
+          : discovered!.codexExecutable,
+        codeModeHostExecutable: values["code-mode-host-executable"]
+          ? requireAbsolute(
+              values["code-mode-host-executable"],
+              "--code-mode-host-executable",
+            )
+          : discovered!.codeModeHostExecutable,
+      });
+      writeJson({ ok: true, dispatcher: settings.dispatcher });
+      return;
+    }
+    case "configure-mcp": {
+      const settings = readRuntimeSettings(manifestPath);
+      if (!settings.dispatcher) {
+        throw new CliUsageError(
+          "configure-dispatcher must complete before configure-mcp",
+        );
+      }
+      const codexExecutable = values["codex-executable"]
+        ? requireAbsolute(values["codex-executable"], "--codex-executable")
+        : settings.dispatcher.codex_executable;
+      const updated = configureMcp({
+        manifestPath,
+        codexExecutable,
+        packageRoot: installedPackageRoot(),
+      });
+      writeJson({ ok: true, mcp: updated.mcp });
+      return;
+    }
+    case "verify": {
+      const report = resumeOnboarding(manifestPath);
+      const settings = readRuntimeSettings(manifestPath);
+      const ok = report.status === "complete" && Boolean(
+        settings.transport && settings.dispatcher && settings.mcp,
+      );
+      writeJson({
+        ok,
+        status: report.status,
+        transport_configured: Boolean(settings.transport),
+        dispatcher_configured: Boolean(settings.dispatcher),
+        mcp_configured: Boolean(settings.mcp),
+        azure_owner_action_required:
+          !settings.transport?.servicebus_namespace,
+      });
+      process.exitCode = ok ? 0 : 1;
+      return;
+    }
+    default:
+      throw new CliUsageError(`unknown onboard action: ${action}`);
+  }
+}
+
+function runForegroundRuntime(args: readonly string[]): void {
+  const runtime = args[0];
+  if (runtime !== "bridge" && runtime !== "dispatcher") {
+    throw new CliUsageError("runtime requires bridge or dispatcher");
+  }
+  const { values, positionals } = parseArgs({
+    args: args.slice(1),
+    allowPositionals: true,
+    strict: true,
+    options: {
+      root: { type: "string" },
+      validate: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  if (positionals.length > 0) {
+    throw new CliUsageError("runtime does not accept extra positional arguments");
+  }
+  if (values.help) {
+    process.stdout.write(`${commandUsages["runtime"]}Runtime: ${runtime}\n`);
+    return;
+  }
+  if (!values.root) throw new CliUsageError("runtime requires --root");
+  const root = requireAbsolute(values.root, "--root");
+  const manifestPath = path.join(root, "onboarding-manifest.json");
+  const manifest = readOnboardingManifest(manifestPath);
+  const settings = readRuntimeSettings(manifestPath);
+  if (!settings.transport) {
+    throw new CliUsageError("configure transport before starting a runtime");
+  }
+  if (
+    runtime === "bridge" &&
+    !values.validate &&
+    !settings.transport.servicebus_namespace
+  ) {
+    throw new StateTransitionError(
+      "Azure transport metadata is required to start the bridge; infrastructure creation remains an owner action",
+    );
+  }
+  if (runtime === "dispatcher" && !settings.dispatcher) {
+    throw new CliUsageError("configure the dispatcher before starting it");
+  }
+  const launch = runtime === "bridge"
+    ? buildBridgeLaunch({
+        packageRoot: installedPackageRoot(),
+        configPath: settings.transport.profile_path,
+        nodeId: manifest.node_id,
+        networkId: manifest.network_id,
+        membershipPath: manifest.membership_path,
+        signingKeyPath: manifest.signing_key_path,
+        azure: {
+          authMode: settings.transport.auth_mode,
+          ...(settings.transport.servicebus_namespace
+            ? { serviceBusNamespace: settings.transport.servicebus_namespace }
+            : {}),
+          topicName: settings.transport.topic_name,
+          subscriptionName: settings.transport.subscription_name,
+          ...(settings.transport.managed_identity_client_id
+            ? { managedIdentityClientId: settings.transport.managed_identity_client_id }
+            : {}),
+          ...(settings.transport.azure_tenant_id
+            ? { tenantId: settings.transport.azure_tenant_id }
+            : {}),
+          ...(settings.transport.azure_client_id
+            ? { clientId: settings.transport.azure_client_id }
+            : {}),
+          ...(settings.transport.azure_client_certificate_path
+            ? { clientCertificatePath: settings.transport.azure_client_certificate_path }
+            : {}),
+        },
+        validateOnly: values.validate ?? false,
+      })
+    : buildDispatcherLaunch({
+        packageRoot: installedPackageRoot(),
+        configPath: settings.transport.profile_path,
+        nodeId: manifest.node_id,
+        projectsConfigPath: settings.dispatcher?.projects_path ?? "",
+        codexExecutable: settings.dispatcher?.codex_executable ?? "",
+        codexSha256: settings.dispatcher?.codex_sha256 ?? "",
+        codeModeHostExecutable:
+          settings.dispatcher?.code_mode_host_executable ?? "",
+        codeModeHostSha256:
+          settings.dispatcher?.code_mode_host_sha256 ?? "",
+        codexHome: settings.dispatcher?.codex_home ?? "",
+        ...(settings.dispatcher?.trusted_path
+          ? { trustedPath: settings.dispatcher.trusted_path }
+          : {}),
+        validateOnly: values.validate ?? false,
+      });
+  const child = spawnSync(launch.command, launch.args, {
+    cwd: root,
+    env: runtimeEnvironment(launch.env, runtime),
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (child.error || child.status !== 0) {
+    throw new StateTransitionError(`${runtime} foreground runtime exited unsuccessfully`);
+  }
+  if (values.validate) writeJson({ ok: true, runtime });
+}
+
+function installedPackageRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
+function isAzureAuthMode(
+  value: string,
+): value is "managed_identity" | "client_certificate" {
+  return value === "managed_identity" || value === "client_certificate";
+}
+
+function discoverCodexBinaries(): {
+  codexExecutable: string;
+  codeModeHostExecutable: string;
+} {
+  if (process.platform !== "win32") {
+    throw new StateTransitionError(
+      "Automatic Codex dispatcher discovery is currently supported only on Windows; pass both executable paths explicitly",
+    );
+  }
+  const npmCli = path.join(
+    path.dirname(process.execPath),
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  if (!fs.existsSync(npmCli)) {
+    throw new StateTransitionError("Unable to locate npm beside the active Node.js runtime");
+  }
+  const npmResult = spawnSync(process.execPath, [npmCli, "root", "--global"], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 10_000,
+  });
+  if (npmResult.error || npmResult.status !== 0) {
+    throw new StateTransitionError("Unable to resolve the global npm package root");
+  }
+  const codexPackage = path.join(
+    npmResult.stdout.trim(),
+    "@openai",
+    "codex",
+  );
+  let candidates: string[];
+  try {
+    candidates = fs.readdirSync(codexPackage, {
+      recursive: true,
+      encoding: "utf8",
+    }).filter((entry) => path.basename(entry).toLowerCase() === "codex.exe")
+      .map((entry) => path.join(codexPackage, entry))
+      .filter((entry) =>
+        fs.existsSync(path.join(path.dirname(entry), "codex-code-mode-host.exe"))
+      );
+  } catch {
+    throw new StateTransitionError(
+      "Unable to inspect the installed Codex package; rerun preflight or pass executable paths explicitly",
+    );
+  }
+  if (candidates.length !== 1) {
+    throw new StateTransitionError(
+      "Unable to identify one pinned Codex runtime pair; pass both executable paths explicitly",
+    );
+  }
+  return {
+    codexExecutable: candidates[0]!,
+    codeModeHostExecutable: path.join(
+      path.dirname(candidates[0]!),
+      "codex-code-mode-host.exe",
+    ),
+  };
+}
+
+function runtimeEnvironment(
+  additions: Readonly<Record<string, string>>,
+  runtime: "bridge" | "dispatcher",
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const upper = key.toUpperCase();
+    if (
+      upper === "BALCONY_SYSTEM_ID" ||
+      upper === "BALCONY_LOCAL_CONFIG" ||
+      upper.startsWith("BALCONY_MESSAGE_AUTH_") ||
+      upper.startsWith("BALCONY_SERVICEBUS_") ||
+      upper.startsWith("BALCONY_AZURE_") ||
+      upper.startsWith("BALCONY_DISPATCHER_") ||
+      upper.startsWith("BALCONY_CODEX_") ||
+      upper.includes("TOKEN") ||
+      upper.includes("PASSWORD") ||
+      upper.includes("CONNECTION_STRING") ||
+      upper.includes("CLIENT_SECRET")
+    ) continue;
+    environment[key] = value;
+  }
+  Object.assign(environment, additions);
+  if (runtime === "dispatcher") {
+    for (const key of Object.keys(environment)) {
+      const upper = key.toUpperCase();
+      if (
+        upper.startsWith("AZURE_") ||
+        upper.startsWith("BALCONY_AZURE_") ||
+        upper.startsWith("BALCONY_SERVICEBUS_") ||
+        upper.startsWith("BALCONY_MESSAGE_AUTH_")
+      ) delete environment[key];
+    }
+  }
+  return environment;
+}
+
+function readPackageVersion(): string {
+  const packagePath = path.join(installedPackageRoot(), "package.json");
+  const manifest = JSON.parse(fs.readFileSync(packagePath, "utf8")) as {
+    version?: unknown;
+  };
+  if (typeof manifest.version !== "string") {
+    throw new CliUsageError("package version is unavailable");
+  }
+  return manifest.version;
 }
 
 function runIdentity(args: readonly string[]): void {

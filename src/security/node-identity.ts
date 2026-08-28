@@ -169,7 +169,9 @@ export function generateNodeIdentity(
 ): GeneratedNodeIdentity {
   try {
     const nodeId = SystemIdSchema.parse(options.nodeId);
-    const outputDirectory = prepareOutputDirectory(options.outputDirectory);
+    const outputDirectory = validateNodeIdentityDirectory(
+      options.outputDirectory,
+    );
     const signingKeyPath = path.join(outputDirectory, PRIVATE_KEY_FILE);
     const enrollmentPath = path.join(outputDirectory, ENROLLMENT_FILE);
     assertOutputMissing(signingKeyPath);
@@ -194,7 +196,6 @@ export function generateNodeIdentity(
 
     let createdPrivateKey = false;
     try {
-      assertIdentityDirectorySecure(outputDirectory);
       fs.writeFileSync(signingKeyPath, privateKeyPem, {
         encoding: "utf8",
         mode: 0o600,
@@ -225,6 +226,12 @@ export function generateNodeIdentity(
     }
     throw new NodeIdentityError("IDENTITY_GENERATION_FAILED");
   }
+}
+
+export function validateNodeIdentityDirectory(outputDirectory: string): string {
+  const resolved = prepareOutputDirectory(outputDirectory);
+  assertIdentityDirectorySecure(resolved);
+  return resolved;
 }
 
 export function deriveEd25519KeyId(spkiDer: Buffer): string {

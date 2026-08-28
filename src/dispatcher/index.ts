@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
+import { parseArgs } from "node:util";
+import path from "node:path";
+
 import {
   loadConfig,
+  loadConfigFile,
+  assertConfigMatchesProcessIdentity,
   loadReadOnlyDispatcherConfig,
   type ReadOnlyDispatcherConfig,
 } from "../config.js";
@@ -54,40 +59,74 @@ async function run(
 }
 
 try {
-  const bridgeConfig = loadConfig();
-  const config = loadReadOnlyDispatcherConfig();
-  const database = new BridgeDatabase(config.databasePath);
-  const projects = ProjectRegistry.load(config.projectsPath);
-  const executor = new LocalCodexExecutor(
-    config.codexExecutable,
-    config.codexHome,
-    config.codexExecutableSha256,
-    config.codexCodeModeHostExecutable,
-    config.codexCodeModeHostSha256,
-    config.trustedPath,
-  );
-  const dispatcher: ForegroundDispatcher =
-    config.mode === "consultation"
-      ? createConsultationDispatcher(
-          config,
-          bridgeConfig,
-          database,
-          projects,
-          executor,
-        )
-      : new ReadOnlyDispatcher(
-          config,
-          database,
-          projects,
-          executor,
-        );
-  const controller = new AbortController();
-  process.once("SIGINT", () => controller.abort());
-  process.once("SIGTERM", () => controller.abort());
-  try {
-    await run(dispatcher, controller, config.pollIntervalMs);
-  } finally {
-    database.close();
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    allowPositionals: true,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      "validate-config": { type: "boolean" },
+      config: { type: "string" },
+    },
+  });
+  if (positionals.length > 0) {
+    throw new DispatchConfigurationError(
+      "The foreground dispatcher does not accept positional arguments.",
+    );
+  }
+  if (values.config !== undefined && !path.isAbsolute(values.config)) {
+    throw new DispatchConfigurationError(
+      "The foreground dispatcher --config path must be absolute.",
+    );
+  }
+  if (values.help) {
+    process.stdout.write(
+      "Usage: balcony-agent-bridge runtime dispatcher --root <absolute-path> [--validate]\n" +
+      "Internal: node dist/dispatcher/index.js [--config <absolute-path>] [--validate-config]\n",
+    );
+  } else {
+    const bridgeConfig = values.config
+      ? assertConfigMatchesProcessIdentity(loadConfigFile(values.config))
+      : loadConfig();
+    const config = loadReadOnlyDispatcherConfig(process.env, bridgeConfig);
+    const database = new BridgeDatabase(config.databasePath);
+    const projects = ProjectRegistry.load(config.projectsPath);
+    const executor = new LocalCodexExecutor(
+      config.codexExecutable,
+      config.codexHome,
+      config.codexExecutableSha256,
+      config.codexCodeModeHostExecutable,
+      config.codexCodeModeHostSha256,
+      config.trustedPath,
+    );
+    if (values["validate-config"]) {
+      process.stdout.write('{"ok":true,"runtime":"dispatcher"}\n');
+      database.close();
+    } else {
+      const dispatcher: ForegroundDispatcher =
+        config.mode === "consultation"
+          ? createConsultationDispatcher(
+              config,
+              bridgeConfig,
+              database,
+              projects,
+              executor,
+            )
+          : new ReadOnlyDispatcher(
+              config,
+              database,
+              projects,
+              executor,
+            );
+      const controller = new AbortController();
+      process.once("SIGINT", () => controller.abort());
+      process.once("SIGTERM", () => controller.abort());
+      try {
+        await run(dispatcher, controller, config.pollIntervalMs);
+      } finally {
+        database.close();
+      }
+    }
   }
 } catch (error) {
   console.error(

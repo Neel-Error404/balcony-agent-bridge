@@ -37,11 +37,10 @@ the smaller static design.
   MCP protocol extension, or a live-service control plane. Its protection is
   the local OS/process identity boundary; signer key IDs are not retained as a
   separate inbox audit field.
-- Current clean-consumer proof uses an isolated npm cache on the current host;
-  it is not evidence from a separate clean OS/VM. Version `0.2.0` is the
-  approved public alpha package and GitHub release target, not a
-  production-service support promise; registry and release availability must
-  be verified independently.
+- Current automated clean-consumer proof uses an isolated npm cache on its
+  executing host. Version `0.3.0` remains a release candidate until registry,
+  byte-identity, and two independent clean-VM reruns complete; neither that
+  release nor `0.2.0` is a production-service support promise.
 - GitHub private vulnerability reporting is enabled. Follow `SECURITY.md` and
   never put sensitive vulnerability details in a public issue.
 - The owner accepted the existing public Git history for `v0.1.0` after a
@@ -49,8 +48,8 @@ the smaller static design.
   connection string, token, or non-example Service Bus hostname. Operational
   handoff and verification records remain intentionally public; the automated
   scan cannot prove the absence of every unknown secret format.
-- A live signed three-machine acceptance test has not been performed on this
-  candidate.
+- A live signed multi-machine acceptance test has not been performed on this
+  candidate; Azure provisioning and operational cutover remain owner-gated.
 
 ## Security Residuals
 

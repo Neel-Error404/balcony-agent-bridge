@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  windows-verification:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Install the supported Codex prerequisite
+        run: npm install --global @openai/codex@0.150.1
+
+      - name: Typecheck and build
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Foundation
+        run: npm run test:foundation
+
+      - name: Component
+        run: npm run test:component
+
+      - name: Integration
+        run: npm run test:integration
+
+      - name: Workflow
+        run: npm run test:workflow
+
+      - name: Recovery
+        run: npm run test:recovery
+
+      - name: Security
+        run: npm run test:security
+
+      - name: MCP smoke
+        run: npm run smoke:mcp
+
+      - name: PowerShell parse
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem -Path scripts,tests -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            $errors += $parseErrors
+          }
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw "PowerShell parse validation failed."
+          }
+
+      - name: Secret and dependency audit
+        run: |
+          npm run check:secrets
+          npm audit --audit-level=high
+
+      - name: Clean-cache installed-package verification
+        run: npm run verify:public-alpha

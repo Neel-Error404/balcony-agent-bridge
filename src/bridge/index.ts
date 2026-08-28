@@ -19,44 +19,51 @@ import { BridgeWorker } from "./worker.js";
 
 try {
   const invocation = parseBridgeInvocation(process.argv.slice(2));
-  const config = invocation.configPath
-    ? assertConfigMatchesProcessIdentity(loadConfigFile(invocation.configPath))
-    : loadConfig();
-  const messageAuthentication = loadMessageAuthenticationRuntimeConfig(
-    process.env,
-    config,
-  );
-  const authenticator = loadMessageAuthenticator({
-    localNodeId: config.systemId,
-    authorizedNodeIds: config.authorizedNodeIds,
-    membershipPath: messageAuthentication.membershipPath,
-    signingKeyPath: messageAuthentication.signingKeyPath,
-  });
-  if (!invocation.validateMessageAuthentication) {
-    const processLock = acquireBridgeProcessLock(config.systemId);
-    try {
-      const database = new BridgeDatabase(config.databasePath);
-      const transport = new ServiceBusBridgeTransport(config, authenticator);
-      const worker = new BridgeWorker(config, database, transport);
-      const controller = new AbortController();
-      process.once("SIGINT", () => controller.abort());
-      process.once("SIGTERM", () => controller.abort());
+  if (invocation.help) {
+    process.stdout.write(
+      "Usage: balcony-agent-bridge runtime bridge --root <absolute-path> [--validate]\n" +
+      "Internal: node dist/bridge/index.js [--config <absolute-path>] [--validate-message-authentication]\n",
+    );
+  } else {
+    const config = invocation.configPath
+      ? assertConfigMatchesProcessIdentity(loadConfigFile(invocation.configPath))
+      : loadConfig();
+    const messageAuthentication = loadMessageAuthenticationRuntimeConfig(
+      process.env,
+      config,
+    );
+    const authenticator = loadMessageAuthenticator({
+      localNodeId: config.systemId,
+      authorizedNodeIds: config.authorizedNodeIds,
+      membershipPath: messageAuthentication.membershipPath,
+      signingKeyPath: messageAuthentication.signingKeyPath,
+    });
+    if (!invocation.validateMessageAuthentication) {
+      const processLock = acquireBridgeProcessLock(config.systemId);
       try {
-        await runBridgeLoops(worker, controller);
-      } finally {
-        const transportClosed = await closeTransportWithin(transport, 5000);
-        if (transportClosed) {
-          database.close();
-        } else {
-          console.error(
-            "Bridge transport did not close within the shutdown deadline",
-          );
-          process.exitCode = 1;
-          setImmediate(() => process.exit(1));
+        const database = new BridgeDatabase(config.databasePath);
+        const transport = new ServiceBusBridgeTransport(config, authenticator);
+        const worker = new BridgeWorker(config, database, transport);
+        const controller = new AbortController();
+        process.once("SIGINT", () => controller.abort());
+        process.once("SIGTERM", () => controller.abort());
+        try {
+          await runBridgeLoops(worker, controller);
+        } finally {
+          const transportClosed = await closeTransportWithin(transport, 5000);
+          if (transportClosed) {
+            database.close();
+          } else {
+            console.error(
+              "Bridge transport did not close within the shutdown deadline",
+            );
+            process.exitCode = 1;
+            setImmediate(() => process.exit(1));
+          }
         }
+      } finally {
+        processLock.release();
       }
-    } finally {
-      processLock.release();
     }
   }
 } catch (error) {
@@ -67,9 +74,10 @@ try {
 function parseBridgeInvocation(args: readonly string[]): {
   configPath?: string;
   validateMessageAuthentication: boolean;
+  help: boolean;
 } {
   if (args.length === 0) {
-    return { validateMessageAuthentication: false };
+    return { validateMessageAuthentication: false, help: false };
   }
   const { values, positionals } = parseArgs({
     args,
@@ -78,17 +86,19 @@ function parseBridgeInvocation(args: readonly string[]): {
     options: {
       "validate-message-authentication": { type: "boolean" },
       config: { type: "string" },
+      help: { type: "boolean", short: "h" },
     },
   });
   if (
     positionals.length > 0 ||
-    values["validate-message-authentication"] !== true ||
     (values.config !== undefined && !path.isAbsolute(values.config))
   ) {
     throw new Error("Invalid bridge process arguments");
   }
   return {
-    validateMessageAuthentication: true,
+    help: values.help ?? false,
+    validateMessageAuthentication:
+      values["validate-message-authentication"] ?? false,
     ...(values.config === undefined ? {} : { configPath: values.config }),
   };
 }

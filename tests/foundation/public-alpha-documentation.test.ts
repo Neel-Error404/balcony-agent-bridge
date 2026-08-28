@@ -11,7 +11,7 @@ function read(relativePath: string): string {
     .replace(/\r\n/g, "\n");
 }
 
-describe("public alpha documentation contract", () => {
+describe("public beta documentation contract", () => {
   it("publishes one ordered operator path from install through recovery", () => {
     const readme = read("README.md");
     const cliSource = read("src/cli/index.ts");
@@ -20,10 +20,11 @@ describe("public alpha documentation contract", () => {
     const windowsRunbook = read("docs/runbooks/windows-service.md");
     const headings = [
       "## Install",
+      "## npm-first two-node onboarding",
       "## Try The Local Demo",
       "## Configure A Node",
       "## Deploy The Shared Transport",
-      "## Connect The Node",
+      "## Source-managed Windows service path",
       "## Verify The Node",
       "## Upgrade",
       "## Recover",
@@ -37,19 +38,22 @@ describe("public alpha documentation contract", () => {
     }
 
     expect(readme).toContain("npm run verify:public-alpha");
-    expect(readme).toContain("npm install --global balcony-agent-bridge@0.2.0");
+    expect(readme).toContain("npm install --global balcony-agent-bridge@0.3.0");
+    expect(readme).toContain("balcony-agent-bridge preflight --root C:\\BalconyPilot-R2");
+    expect(readme).toContain("balcony-agent-bridge onboard start");
+    expect(readme).toContain("docs/npm-first-onboarding.md");
     expect(readme).toContain(
-      "npm view balcony-agent-bridge@0.2.0 version\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to confirm balcony-agent-bridge@0.2.0 in the npm registry; registry installation is unavailable.\"\n}\nnpm install --global balcony-agent-bridge@0.2.0\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to install balcony-agent-bridge@0.2.0 from the npm registry; registry installation is unavailable.\"\n}\n$globalNodeModules = npm root --global\nif ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($globalNodeModules)) {\n  throw \"Unable to resolve the global npm package directory; registry installation is unavailable.\"\n}\n$packageDirectory = Join-Path $globalNodeModules \"balcony-agent-bridge\"\n$packageManifest = Join-Path $packageDirectory \"package.json\"\nif (-not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {\n  throw \"The installed balcony-agent-bridge package manifest is missing; registry installation is unavailable.\"\n}\n$installedPackage = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json\nif ($installedPackage.version -ne \"0.2.0\") {\n  throw \"The installed balcony-agent-bridge version is not 0.2.0; registry installation is unavailable.\"\n}\n$bridgeCli = Join-Path $packageDirectory \"dist/cli/index.js\"\nif (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {\n  throw \"The installed balcony-agent-bridge@0.2.0 CLI entrypoint is missing; registry installation is unavailable.\"\n}\n$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path\nif (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {\n  throw \"Unable to resolve the Node application path; registry installation is unavailable.\"\n}\n& $nodePath $bridgeCli --help\n$cliStarted = $?\n$cliExitCode = $LASTEXITCODE\nif (-not $cliStarted -or $cliExitCode -ne 0) {\n  throw \"The installed balcony-agent-bridge@0.2.0 CLI did not start; registry installation is unavailable.\"\n}",
+      "npm view balcony-agent-bridge@0.3.0 version\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to confirm balcony-agent-bridge@0.3.0 in the npm registry; registry installation is unavailable.\"\n}\nnpm install --global balcony-agent-bridge@0.3.0\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to install balcony-agent-bridge@0.3.0 from the npm registry; registry installation is unavailable.\"\n}",
     );
     expect(readme).toContain("& $nodePath $bridgeCli demo");
     expect(readme).toContain("& $nodePath $bridgeCli setup `");
     expect(readme).toContain("& $nodePath $bridgeCli identity `");
     expect(readme).toContain("& $nodePath $bridgeCli doctor --config");
     expect(readme).toContain("& $nodePath $bridgeCli status --config");
-    expect(readme).not.toMatch(
-      /^balcony-agent-bridge (?:demo|setup|identity|doctor|status)\b/m,
+    expect(readme).toMatch(
+      /^balcony-agent-bridge (?:preflight|onboard|runtime)\b/m,
     );
-    expect(readme).toContain("production service installation remains a reviewed source");
+    expect(readme).toContain("installation and Azure provisioning remain separately reviewed owner actions");
     expect(readme).toContain(
       "`& $nodePath $bridgeCli`; do not rely on a global PATH shim.",
     );
@@ -60,7 +64,7 @@ describe("public alpha documentation contract", () => {
       "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
     expect(readme).toContain(
-      "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to clone the GitHub source repository; source installation is unavailable.\"\n}\nSet-Location balcony-agent-bridge -ErrorAction Stop\ngit fetch --tags --force\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to fetch GitHub release tags; source installation is unavailable.\"\n}\nif (-not (git tag --list v0.2.0)) {\n  throw \"GitHub has not exposed the v0.2.0 release tag; source installation is unavailable.\"\n}\ngit checkout --detach v0.2.0\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to check out the v0.2.0 release tag; source installation is unavailable.\"\n}\nnpm ci\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to install source dependencies; source installation is unavailable.\"\n}\nnpm run build\nif ($LASTEXITCODE -ne 0) {\n  throw \"Unable to build the v0.2.0 source checkout; source installation is unavailable.\"\n}\n$nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path\nif (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {\n  throw \"Unable to resolve the Node application path; source installation is unavailable.\"\n}\n$bridgeCli = (Resolve-Path -LiteralPath .\\dist\\cli\\index.js -ErrorAction Stop).Path\nif (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {\n  throw \"The built balcony-agent-bridge CLI entrypoint is missing; source installation is unavailable.\"\n}\n& $nodePath $bridgeCli --help\n$cliStarted = $?\n$cliExitCode = $LASTEXITCODE\nif (-not $cliStarted -or $cliExitCode -ne 0) {\n  throw \"The built balcony-agent-bridge@0.2.0 CLI did not start; source installation is unavailable.\"\n}",
+      "git clone https://github.com/Neel-Error404/balcony-agent-bridge.git",
     );
     expect(readme).toContain("--subscription build-node");
     expect(windowsRunbook).toContain('SubscriptionName = "build-node"');
@@ -120,6 +124,13 @@ describe("public alpha documentation contract", () => {
         "## Review, Merge, And Artifact Freeze",
         "## Publication And Public Verification",
         "## Deferred Operations",
+      ],
+      "docs/release-manifest-v0.3.md": [
+        "# v0.3 npm-first onboarding release manifest",
+        "## Compatibility contract",
+        "## Required verification ladder",
+        "## Exact artifact and publication evidence",
+        "## Deferred owner operations",
       ],
       "docs/verification/SYS-A-V0.1.0-HISTORY-PRIVACY-REVIEW-2026-08-26.md": [
         "# SYS-A v0.1.0 History And Privacy Review",

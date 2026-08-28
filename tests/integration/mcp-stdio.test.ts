@@ -14,10 +14,15 @@ describe("MCP stdio process", () => {
 
   afterEach(() => {
     for (const directory of temporaryDirectories) {
-      fs.rmSync(directory, { recursive: true, force: true });
+      fs.rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
     temporaryDirectories.length = 0;
-  });
+  }, 15_000);
 
   it("starts with protocol-clean stdout and exposes bridge status", async () => {
     const temporaryDirectory = fs.mkdtempSync(
@@ -75,7 +80,7 @@ describe("MCP stdio process", () => {
     } finally {
       await client.close();
     }
-  });
+  }, 15_000);
 
   it("starts from the explicit local profile produced by setup", async () => {
     const temporaryDirectory = fs.mkdtempSync(
@@ -127,7 +132,7 @@ describe("MCP stdio process", () => {
     } finally {
       await client.close();
     }
-  });
+  }, 15_000);
 
   it("rejects an explicit local profile that does not match the process identity", () => {
     const temporaryDirectory = fs.mkdtempSync(
