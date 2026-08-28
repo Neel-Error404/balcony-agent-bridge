@@ -346,6 +346,29 @@ describe("npm-first onboarding", () => {
     expect(fs.existsSync(path.join(redirectedRoot, "onboarding-manifest.json"))).toBe(false);
   });
 
+  it("rejects an onboarding root replaced by a reparse point after setup", () => {
+    const root = temporaryRoot();
+    const manifest = startOnboarding({
+      root,
+      nodeId: "node-a",
+      processIdentity: "node-a",
+      networkId: "engineering",
+      authorizedNodeIds: ["node-b"],
+    });
+    const target = `${root}-target`;
+    fs.renameSync(root, target);
+    roots.push(target);
+    fs.symlinkSync(
+      target,
+      root,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    expect(() => statusOnboarding(manifest.manifestPath)).toThrow(
+      expect.objectContaining({ code: "ONBOARDING_ROOT_INVALID" }),
+    );
+  });
+
   it("rejects enrollment with unknown/private fields", () => {
     const root = temporaryRoot();
     const manifest = startOnboarding({

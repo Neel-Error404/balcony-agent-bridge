@@ -133,4 +133,13 @@ describe("npm release boundary", () => {
       );
     }
   });
+
+  it("pins CI to the verified Windows Node runtime", () => {
+    const workflow = fs.readFileSync(
+      path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("node-version: 22.14.0");
+  });
 });

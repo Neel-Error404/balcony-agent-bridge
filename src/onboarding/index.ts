@@ -739,6 +739,7 @@ function sameStart(manifest: OnboardingManifest, root: string, input: StartOnboa
 
 function readManifest(manifestPath: string): OnboardingManifest {
   try {
+    validateOnboardingRootDirectory(path.dirname(manifestPath));
     const manifest = ManifestSchema.parse(JSON.parse(readRegularFile(manifestPath).toString("utf8")));
     validateManifest(manifest, manifestPath);
     return manifest;
