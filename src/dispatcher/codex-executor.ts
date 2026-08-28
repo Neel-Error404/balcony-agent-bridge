@@ -26,6 +26,9 @@ export interface CodexExecutor {
 export class LocalCodexExecutor implements CodexExecutor {
   private readonly executable: string;
   private readonly codexHome: string;
+  private readonly powerShell:
+    | { executable: string; sha256: string }
+    | undefined;
 
   public constructor(
     executable: string,
@@ -37,6 +40,11 @@ export class LocalCodexExecutor implements CodexExecutor {
     private readonly sourceEnvironment: NodeJS.ProcessEnv = process.env,
   ) {
     this.executable = requireFile(executable, "Codex executable");
+    this.powerShell =
+      process.platform === "win32" &&
+      path.extname(this.executable).toLowerCase() === ".ps1"
+        ? resolvePowerShell7(sourceEnvironment)
+        : undefined;
     const codeModeHost = requireFile(
       codeModeHostExecutable,
       "Codex code-mode host",
@@ -101,22 +109,26 @@ export class LocalCodexExecutor implements CodexExecutor {
             "view_image",
           ]
         : [];
-    const invocation = createInvocation(this.executable, [
-      "--ask-for-approval",
-      "never",
-      "exec",
-      "--ephemeral",
-      "--ignore-user-config",
-      "--strict-config",
-      "--sandbox",
-      "read-only",
-      "--color",
-      "never",
-      ...evidenceOnlyArguments,
-      "--cd",
-      projectPath,
-      "-",
-    ]);
+    const invocation = createInvocation(
+      this.executable,
+      [
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--strict-config",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        ...evidenceOnlyArguments,
+        "--cd",
+        projectPath,
+        "-",
+      ],
+      this.powerShell,
+    );
 
     return new Promise<CodexExecutionResult>((resolve, reject) => {
       let child: ChildProcessWithoutNullStreams;
@@ -365,9 +377,7 @@ function verifyFileHash(
       `The configured ${label} SHA-256 is invalid.`,
     );
   }
-  const actual = createHash("sha256")
-    .update(fs.readFileSync(file))
-    .digest("hex");
+  const actual = fileSha256(file);
   if (actual !== normalizedExpected) {
     throw new DispatchConfigurationError(
       `The configured ${label} did not match its approved SHA-256.`,
@@ -378,17 +388,21 @@ function verifyFileHash(
 function createInvocation(
   executable: string,
   codexArguments: readonly string[],
+  powerShell?: { executable: string; sha256: string },
 ): { command: string; args: string[] } {
   if (
     process.platform === "win32" &&
     path.extname(executable).toLowerCase() === ".ps1"
   ) {
-    const powershell = path.join(
-      process.env["SystemRoot"] ?? "C:\\Windows",
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe",
+    if (!powerShell) {
+      throw new DispatchConfigurationError(
+        "PowerShell 7 is required to launch a Codex PowerShell wrapper.",
+      );
+    }
+    verifyFileHash(
+      powerShell.executable,
+      powerShell.sha256,
+      "PowerShell 7 executable",
     );
     const script = [
       "$ErrorActionPreference = 'Stop'",
@@ -399,7 +413,7 @@ function createInvocation(
       "exit $LASTEXITCODE",
     ].join("\n");
     return {
-      command: powershell,
+      command: powerShell.executable,
       args: [
         "-NoLogo",
         "-NoProfile",
@@ -423,6 +437,139 @@ function createInvocation(
     command: executable,
     args: [...codexArguments],
   };
+}
+
+function resolvePowerShell7(
+  source: NodeJS.ProcessEnv,
+): { executable: string; sha256: string } {
+  const systemRoot = source["SystemRoot"] ?? source["WINDIR"] ?? "C:\\Windows";
+  const whereExecutable = path.join(systemRoot, "System32", "where.exe");
+  const lookup = spawnSync(whereExecutable, ["pwsh.exe"], {
+    encoding: "utf8",
+    env: source,
+    timeout: 5000,
+    windowsHide: true,
+  });
+  const candidate = lookup.status === 0
+    ? lookup.stdout.split(/\r?\n/u).map((entry) => entry.trim()).find(Boolean)
+    : undefined;
+  if (!candidate) {
+    throw new DispatchConfigurationError(
+      "PowerShell 7 is required to launch a Codex PowerShell wrapper.",
+    );
+  }
+  let resolved: string;
+  try {
+    const metadata = fs.lstatSync(candidate);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error("not a regular file");
+    }
+    resolved = fs.realpathSync.native(candidate);
+  } catch (error) {
+    throw new DispatchConfigurationError(
+      "PowerShell 7 must resolve to a regular, non-reparse executable.",
+      { cause: error },
+    );
+  }
+  const hashBeforeSignature = fileSha256(resolved);
+  const systemPowerShell = path.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const signatureScript = [
+    `$signature = Get-AuthenticodeSignature -LiteralPath ${powerShellLiteral(resolved)}`,
+    "$subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }",
+    "@{ status = [string]$signature.Status; subject = [string]$subject } | ConvertTo-Json -Compress",
+  ].join("\n");
+  const signature = spawnSync(
+    systemPowerShell,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      Buffer.from(signatureScript, "utf16le").toString("base64"),
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        PATH: path.dirname(systemPowerShell),
+        PATHEXT: source["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD",
+        SystemRoot: systemRoot,
+        WINDIR: source["WINDIR"] ?? systemRoot,
+      },
+      timeout: 5000,
+      windowsHide: true,
+    },
+  );
+  let signatureResult: { status?: unknown; subject?: unknown } = {};
+  try {
+    signatureResult = JSON.parse(signature.stdout.trim()) as {
+      status?: unknown;
+      subject?: unknown;
+    };
+  } catch {
+    // The stable error below deliberately avoids exposing tool output or paths.
+  }
+  const hashAfterSignature = fileSha256(resolved);
+  if (
+    signature.error ||
+    signature.status !== 0 ||
+    signatureResult.status !== "Valid" ||
+    typeof signatureResult.subject !== "string" ||
+    !/(?:^|,\s*)O=Microsoft Corporation(?:,|$)/u.test(signatureResult.subject) ||
+    hashBeforeSignature !== hashAfterSignature
+  ) {
+    throw new DispatchConfigurationError(
+      "A valid Microsoft-signed PowerShell 7 executable is required to launch a Codex PowerShell wrapper.",
+    );
+  }
+  const probeEnvironment: NodeJS.ProcessEnv = {
+    PATH: path.dirname(resolved),
+    PATHEXT: source["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD",
+    SystemRoot: systemRoot,
+    WINDIR: source["WINDIR"] ?? systemRoot,
+  };
+  for (const key of ["TEMP", "TMP"]) {
+    if (source[key]) probeEnvironment[key] = source[key];
+  }
+  const version = spawnSync(
+    resolved,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$PSVersionTable.PSVersion.Major",
+    ],
+    {
+      encoding: "utf8",
+      env: probeEnvironment,
+      timeout: 5000,
+      windowsHide: true,
+    },
+  );
+  const versionText = version.stdout.trim();
+  const major = /^\d+$/u.test(versionText)
+    ? Number.parseInt(versionText, 10)
+    : Number.NaN;
+  if (version.error || version.status !== 0 || !Number.isInteger(major) || major < 7) {
+    throw new DispatchConfigurationError(
+      "PowerShell 7 is required to launch a Codex PowerShell wrapper.",
+    );
+  }
+  return { executable: resolved, sha256: hashAfterSignature };
+}
+
+function fileSha256(file: string): string {
+  return createHash("sha256")
+    .update(fs.readFileSync(file))
+    .digest("hex");
 }
 
 function powerShellLiteral(value: string): string {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -385,6 +386,63 @@ describe("LocalCodexExecutor process boundary", () => {
         ),
     ).toThrow(/same directory/);
   });
+
+  it.runIf(process.platform === "win32")(
+    "rejects a PowerShell wrapper when PowerShell 7 is unavailable",
+    () => {
+      const executable = writePowerShellFixture(
+        temporaryDirectory,
+        "missing-pwsh.ps1",
+        ["Write-Output 'should not run'"],
+      );
+
+      expect(
+        () =>
+          new LocalCodexExecutor(
+            executable,
+            codexHome,
+            fileHash(executable),
+            codeModeHost,
+            fileHash(codeModeHost),
+            trustedPath(),
+            {
+              ...process.env,
+              PATH: temporaryDirectory,
+              Path: temporaryDirectory,
+            },
+          ),
+      ).toThrow(/PowerShell 7/);
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "rejects an unsigned PATH executable that impersonates PowerShell 7",
+    () => {
+      const executable = writePowerShellFixture(
+        temporaryDirectory,
+        "untrusted-pwsh.ps1",
+        ["Write-Output 'should not run'"],
+      );
+      writeFakePowerShell7(temporaryDirectory);
+
+      expect(
+        () =>
+          new LocalCodexExecutor(
+            executable,
+            codexHome,
+            fileHash(executable),
+            codeModeHost,
+            fileHash(codeModeHost),
+            trustedPath(),
+            {
+              ...process.env,
+              PATH: temporaryDirectory,
+              Path: temporaryDirectory,
+            },
+          ),
+      ).toThrow(/Microsoft-signed PowerShell 7/);
+    },
+  );
 });
 
 function writePowerShellFixture(
@@ -409,4 +467,37 @@ function trustedPath(): string {
 
 function powerShellLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
+}
+
+function writeFakePowerShell7(directory: string): void {
+  const source = path.join(directory, "fake-pwsh.cs");
+  const output = path.join(directory, "pwsh.exe");
+  fs.writeFileSync(
+    source,
+    [
+      "using System;",
+      "public static class Program {",
+      "  public static int Main(string[] args) {",
+      "    Console.WriteLine(\"7\");",
+      "    return 0;",
+      "  }",
+      "}",
+    ].join("\r\n"),
+    "utf8",
+  );
+  const compiler = path.join(
+    process.env["WINDIR"] ?? "C:\\Windows",
+    "Microsoft.NET",
+    "Framework64",
+    "v4.0.30319",
+    "csc.exe",
+  );
+  const result = spawnSync(
+    compiler,
+    ["/nologo", "/target:exe", `/out:${output}`, source],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (result.error || result.status !== 0) {
+    throw new Error(`Unable to build the fake PowerShell fixture: ${result.stderr}`);
+  }
 }
