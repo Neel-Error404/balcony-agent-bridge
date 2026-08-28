@@ -392,11 +392,10 @@ function createInvocation(
     );
     const script = [
       "$ErrorActionPreference = 'Stop'",
-      "$prompt = [Console]::In.ReadToEnd()",
       `$arguments = @(${codexArguments
         .map((argument) => powerShellLiteral(argument))
         .join(", ")})`,
-      `$prompt | & ${powerShellLiteral(executable)} @arguments`,
+      `& ${powerShellLiteral(executable)} @arguments`,
       "exit $LASTEXITCODE",
     ].join("\n");
     return {

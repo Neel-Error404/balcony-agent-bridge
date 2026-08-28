@@ -45,7 +45,7 @@ describe("LocalCodexExecutor process boundary", () => {
       temporaryDirectory,
       "inspect.ps1",
       [
-        "$prompt = $input | Out-String",
+        "$prompt = [Console]::In.ReadToEnd()",
         "$result = @{",
         "  arguments = @($args)",
         "  prompt = $prompt",
@@ -119,7 +119,7 @@ describe("LocalCodexExecutor process boundary", () => {
       temporaryDirectory,
       "evidence-only.ps1",
       [
-        "$prompt = $input | Out-String",
+        "$prompt = [Console]::In.ReadToEnd()",
         "@{ arguments = @($args); prompt = $prompt } | ConvertTo-Json -Compress",
       ],
     );
@@ -167,7 +167,7 @@ describe("LocalCodexExecutor process boundary", () => {
       temporaryDirectory,
       "hang.ps1",
       [
-        "$input | Out-Null",
+        "$null = [Console]::In.ReadToEnd()",
         "Start-Sleep -Seconds 30",
         "Write-Output 'late output'",
       ],
@@ -208,7 +208,7 @@ describe("LocalCodexExecutor process boundary", () => {
       temporaryDirectory,
       "abort.ps1",
       [
-        "$input | Out-Null",
+        "$null = [Console]::In.ReadToEnd()",
         [
           "Start-Process",
           `-FilePath ${powerShellLiteral(path.join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))}`,
@@ -251,7 +251,7 @@ describe("LocalCodexExecutor process boundary", () => {
       temporaryDirectory,
       "large-output.ps1",
       [
-        "$input | Out-Null",
+        "$null = [Console]::In.ReadToEnd()",
         "Write-Output ('x' * 5000)",
       ],
     );
