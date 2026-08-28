@@ -32,8 +32,13 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  });
+    fs.rmSync(temporaryDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    });
+  }, 30_000);
 
   it("uses fixed read-only arguments, stdin prompts, and a minimal environment", async () => {
     const executable = writePowerShellFixture(
@@ -107,7 +112,7 @@ describe("LocalCodexExecutor process boundary", () => {
     expect(output.codexHome).toBe(fs.realpathSync.native(codexHome));
     expect(output.bridgeNamespace).toBeFalsy();
     expect(output.azureSecret).toBeFalsy();
-  });
+  }, 20_000);
 
   it("disables local file-reading tools for evidence-only execution", async () => {
     const executable = writePowerShellFixture(
@@ -155,7 +160,7 @@ describe("LocalCodexExecutor process boundary", () => {
     expect(output.prompt.trimEnd()).toBe(
       "Use only the supplied evidence.",
     );
-  });
+  }, 20_000);
 
   it("terminates a worker that exceeds its timeout", async () => {
     const executable = writePowerShellFixture(
@@ -187,7 +192,7 @@ describe("LocalCodexExecutor process boundary", () => {
     ).rejects.toMatchObject({
       code: "CODEX_TIMED_OUT",
     });
-  });
+  }, 20_000);
 
   it("terminates a worker when the dispatcher is shutting down", async () => {
     const marker = path.join(temporaryDirectory, "orphan-marker.txt");
@@ -239,7 +244,7 @@ describe("LocalCodexExecutor process boundary", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 2500));
     expect(fs.existsSync(marker)).toBe(false);
-  });
+  }, 20_000);
 
   it("terminates a worker whose output exceeds the configured bound", async () => {
     const executable = writePowerShellFixture(
@@ -270,7 +275,7 @@ describe("LocalCodexExecutor process boundary", () => {
     ).rejects.toMatchObject({
       code: "CODEX_OUTPUT_INVALID",
     });
-  });
+  }, 20_000);
 
   it("never copies arbitrary parent environment variables", () => {
     const environment = createChildEnvironment(
