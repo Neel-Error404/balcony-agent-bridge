@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   windows-verification:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - name: Check out full history

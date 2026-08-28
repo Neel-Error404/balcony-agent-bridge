@@ -140,6 +140,7 @@ describe("npm release boundary", () => {
       "utf8",
     );
 
+    expect(workflow).toContain("runs-on: windows-2022");
     expect(workflow).toContain("node-version: 22.14.0");
   });
 });
