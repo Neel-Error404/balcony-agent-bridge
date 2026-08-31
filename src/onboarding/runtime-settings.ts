@@ -122,11 +122,37 @@ export interface ConfigureMcpInput {
   ) => { status: number | null; stdout: string; stderr: string };
 }
 
+export interface DispatcherAuthenticationReadiness {
+  codexHome: string;
+  authenticated: boolean;
+}
+
+export interface VerifyMcpRegistrationInput {
+  manifestPath: string;
+  packageRoot: string;
+  codexExecutable?: string;
+  runCodex?: (
+    args: readonly string[],
+    env: NodeJS.ProcessEnv,
+  ) => { status: number | null; stdout: string; stderr: string };
+}
+
 export function configureTransport(
   input: ConfigureTransportInput,
 ): RuntimeSettings & { transport: z.infer<typeof TransportSchema> } {
   const manifest = requireCompleteOnboarding(input.manifestPath);
-  if (Boolean(input.serviceBusNamespace) === Boolean(input.localOnly)) {
+  const topicName = normalizeTransportName(
+    input.topicName ?? "agent-messages",
+    "topic name",
+  );
+  const subscriptionName = normalizeTransportName(
+    input.subscriptionName ?? manifest.node_id,
+    "subscription name",
+  );
+  const serviceBusNamespace = input.serviceBusNamespace === undefined
+    ? undefined
+    : normalizeTransportName(input.serviceBusNamespace, "Service Bus namespace");
+  if (Boolean(serviceBusNamespace) === Boolean(input.localOnly)) {
     throw new OnboardingRuntimeError(
       "RUNTIME_SETTINGS_INVALID",
       "Choose exactly one of a Service Bus namespace or explicit local-only evaluation.",
@@ -140,10 +166,10 @@ export function configureTransport(
     configured: true,
     profile_path: manifest.profile_path,
     database_path: manifest.database_path,
-    topic_name: input.topicName ?? "agent-messages",
-    subscription_name: input.subscriptionName ?? manifest.node_id,
-    ...(input.serviceBusNamespace
-      ? { servicebus_namespace: input.serviceBusNamespace }
+    topic_name: topicName,
+    subscription_name: subscriptionName,
+    ...(serviceBusNamespace
+      ? { servicebus_namespace: serviceBusNamespace }
       : {}),
     auth_mode: input.authMode,
     local_only: input.localOnly ?? false,
@@ -185,11 +211,11 @@ export function configureTransport(
     authorizedNodeIds: manifest.authorized_node_ids,
     mcpCommand: process.execPath,
     mcpCommandArgs: [mcpEntrypoint],
-    topicName: input.topicName ?? "agent-messages",
-    subscriptionName: input.subscriptionName ?? manifest.node_id,
-    ...(input.serviceBusNamespace ? { azureAuthMode: input.authMode } : {}),
-    ...(input.serviceBusNamespace
-      ? { serviceBusNamespace: input.serviceBusNamespace }
+    topicName,
+    subscriptionName,
+    ...(serviceBusNamespace ? { azureAuthMode: input.authMode } : {}),
+    ...(serviceBusNamespace
+      ? { serviceBusNamespace }
       : {}),
     ...(input.managedIdentityClientId
       ? { managedIdentityClientId: input.managedIdentityClientId }
@@ -272,18 +298,14 @@ export function configureDispatcher(
     );
   }
   const projects = parsedProjects.data;
-  const codexHome = resolveCodexHome(manifest.root, manifest.node_id);
-  try {
-    prepareIdentityDirectory(codexHome);
-    validateNodeIdentityDirectory(codexHome);
-  } catch (error) {
-    if (error instanceof OnboardingRuntimeError) throw error;
+  const authentication = prepareDispatcherAuthentication(input.manifestPath);
+  if (!authentication.authenticated) {
     throw new OnboardingRuntimeError(
       "DISPATCHER_CONFIGURATION_INVALID",
-      "The dedicated Codex home could not be secured.",
-      { cause: error },
+      "The dedicated Codex home is not authenticated. Authenticate Codex in the dedicated CODEX_HOME with codex login before configuring the dispatcher.",
     );
   }
+  const codexHome = authentication.codexHome;
   const dispatcher = DispatcherSchema.parse({
     configured: true,
     projects_path: projectsPath,
@@ -315,6 +337,36 @@ export function configureDispatcher(
     false,
   );
   return updateSettings(input.manifestPath, { dispatcher });
+}
+
+/**
+ * Creates and reports the protected dispatcher Codex home so an operator can
+ * authenticate it explicitly before dispatcher configuration.
+ */
+export function prepareDispatcherAuthentication(
+  manifestPath: string,
+): DispatcherAuthenticationReadiness {
+  const manifest = requireCompleteOnboarding(manifestPath);
+  const codexHome = resolveCodexHome(manifest.root, manifest.node_id);
+  try {
+    prepareIdentityDirectory(codexHome);
+    validateNodeIdentityDirectory(codexHome);
+  } catch (error) {
+    throw new OnboardingRuntimeError(
+      "DISPATCHER_CONFIGURATION_INVALID",
+      "The dedicated Codex home could not be secured.",
+      { cause: error },
+    );
+  }
+  try {
+    validateCodexAuthentication(codexHome);
+    return { codexHome, authenticated: true };
+  } catch (error) {
+    if (error instanceof OnboardingRuntimeError) {
+      return { codexHome, authenticated: false };
+    }
+    throw error;
+  }
 }
 
 export function configureMcp(
@@ -424,6 +476,66 @@ export function configureMcp(
   }
   validateMcpRegistration(verified.stdout, manifest, mcpEntrypoint);
   return updateSettings(input.manifestPath, { mcp: { configured: true } });
+}
+
+/**
+ * Revalidates the persisted dedicated-home MCP registration without mutating
+ * Codex or runtime settings. This is intended for `onboard verify`.
+ */
+export function verifyMcpRegistration(
+  input: VerifyMcpRegistrationInput,
+): void {
+  const manifest = requireCompleteOnboarding(input.manifestPath);
+  const settings = readRuntimeSettings(input.manifestPath);
+  if (!settings.dispatcher || !settings.mcp) {
+    throw new OnboardingRuntimeError(
+      "ONBOARDING_INCOMPLETE",
+      "Configure the dispatcher and MCP registration before verifying MCP.",
+    );
+  }
+  const configuredCodexExecutable = requireRegularFile(
+    input.codexExecutable ?? settings.dispatcher.codex_executable,
+    "The Codex executable is unavailable.",
+  );
+  if (
+    !sameResolvedPath(
+      configuredCodexExecutable,
+      settings.dispatcher.codex_executable,
+    ) ||
+    hashFile(configuredCodexExecutable) !== settings.dispatcher.codex_sha256
+  ) {
+    throw new OnboardingRuntimeError(
+      "RUNTIME_SETTINGS_CONFLICT",
+      "The Codex executable does not match the pinned dispatcher executable.",
+    );
+  }
+  const mcpEntrypoint = requireRegularFile(
+    path.join(requireAbsolute(input.packageRoot), "dist", "mcp", "index.js"),
+    "The installed MCP entrypoint is unavailable.",
+  );
+  const codexEnvironment = buildCodexEnvironment(settings.dispatcher.codex_home);
+  const result = input.runCodex
+    ? input.runCodex(
+        ["mcp", "get", "balcony-agent-bridge", "--json"],
+        codexEnvironment,
+      )
+    : spawnSync(
+        configuredCodexExecutable,
+        ["mcp", "get", "balcony-agent-bridge", "--json"],
+        {
+          encoding: "utf8",
+          env: codexEnvironment,
+          windowsHide: true,
+          timeout: 15_000,
+        },
+      );
+  if (result.status !== 0) {
+    throw new OnboardingRuntimeError(
+      "RUNTIME_SETTINGS_CONFLICT",
+      "The bound Balcony MCP registration is missing from the dedicated Codex home.",
+    );
+  }
+  validateMcpRegistration(result.stdout, manifest, mcpEntrypoint);
 }
 
 function validateMcpRegistration(
@@ -777,6 +889,9 @@ function validateSettingsBindings(
     if (canonicalJson(profile) !== canonicalJson(expectedProfile)) {
       throw new Error("transport profile does not match runtime settings");
     }
+    if (settings.transport.azure_client_certificate_path) {
+      requireRegularArtifact(settings.transport.azure_client_certificate_path);
+    }
   }
   if (settings.dispatcher) {
     const projectsPath = path.join(manifest.root, PROJECTS_FILE);
@@ -820,6 +935,7 @@ function validateSettingsBindings(
     }
     try {
       validateNodeIdentityDirectory(settings.dispatcher.codex_home);
+      validateCodexAuthentication(settings.dispatcher.codex_home);
     } catch (error) {
       throw new OnboardingRuntimeError(
         "RUNTIME_SETTINGS_CONFLICT",
@@ -891,6 +1007,47 @@ function buildCodexEnvironment(codexHome: string): NodeJS.ProcessEnv {
     if (value !== undefined) environment[name] = value;
   }
   return environment;
+}
+
+function normalizeTransportName(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new OnboardingRuntimeError(
+      "RUNTIME_SETTINGS_INVALID",
+      `The ${label} must not be blank.`,
+    );
+  }
+  return normalized;
+}
+
+function validateCodexAuthentication(codexHome: string): void {
+  const authPath = path.join(codexHome, "auth.json");
+  const metadata = fs.lstatSync(authPath, { throwIfNoEntry: false });
+  if (!metadata?.isFile() || metadata.isSymbolicLink()) {
+    throw new OnboardingRuntimeError(
+      "DISPATCHER_CONFIGURATION_INVALID",
+      "The dedicated Codex home is not authenticated. Authenticate Codex in the dedicated CODEX_HOME with codex login before configuring the dispatcher.",
+    );
+  }
+  try {
+    const auth = z.object({
+      auth_mode: z.string().min(1),
+      OPENAI_API_KEY: z.string().min(1).nullable().optional(),
+      tokens: z.object({
+        access_token: z.string().min(1),
+        refresh_token: z.string().min(1),
+      }).partial().optional(),
+    }).passthrough().parse(JSON.parse(fs.readFileSync(authPath, "utf8")));
+    if (!auth.OPENAI_API_KEY && !auth.tokens?.access_token) {
+      throw new Error("no Codex credential is present");
+    }
+  } catch (error) {
+    throw new OnboardingRuntimeError(
+      "DISPATCHER_CONFIGURATION_INVALID",
+      "The dedicated Codex home authentication is invalid. Authenticate Codex in the dedicated CODEX_HOME with codex login before configuring the dispatcher.",
+      { cause: error },
+    );
+  }
 }
 
 function requireAbsolute(value: string): string {

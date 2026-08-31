@@ -970,7 +970,56 @@ function verifyInstalledOnboarding({
       consumerDirectory,
       { env: environment },
     ), 0, `packaged local transport configuration ${nodeId}`);
-    const dispatcherConfiguration = runInstalledCli(
+    requireExit(runInstalledCli(
+      cliBin,
+      ["runtime", "bridge", "--root", root, "--validate"],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged bridge validation ${nodeId}`);
+    if (!requirePreflight) {
+      continue;
+    }
+    let dispatcherConfiguration = runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "configure-dispatcher",
+        "--root",
+        root,
+        "--project-key",
+        "package-consumer",
+        "--project-path",
+        consumerDirectory,
+      ],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(
+      dispatcherConfiguration,
+      1,
+      `packaged dispatcher authentication preparation ${nodeId}`,
+    );
+    const authentication = JSON.parse(dispatcherConfiguration.stdout);
+    if (
+      authentication.ok !== false ||
+      authentication.authentication_required !== true ||
+      typeof authentication.codex_home !== "string"
+    ) {
+      throw new Error(
+        `Packaged dispatcher did not surface dedicated-home authentication for ${nodeId}`,
+      );
+    }
+    const codexHome = authentication.codex_home;
+    onboardingIdentityDirectories.push(codexHome);
+    fs.writeFileSync(
+      path.join(codexHome, "auth.json"),
+      `${JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: { access_token: "package-verification-placeholder" },
+      })}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+    dispatcherConfiguration = runInstalledCli(
       cliBin,
       [
         "onboard",
@@ -990,21 +1039,15 @@ function verifyInstalledOnboarding({
       0,
       `packaged dispatcher configuration ${nodeId}`,
     );
-    const codexHome = JSON.parse(dispatcherConfiguration.stdout)
-      .dispatcher.codex_home;
-    onboardingIdentityDirectories.push(codexHome);
+    if (JSON.parse(dispatcherConfiguration.stdout).dispatcher.codex_home !== codexHome) {
+      throw new Error(`Packaged dispatcher changed its dedicated Codex home for ${nodeId}`);
+    }
     requireExit(runInstalledCli(
       cliBin,
       ["onboard", "configure-mcp", "--root", root],
       consumerDirectory,
       { env: environment },
     ), 0, `packaged MCP registration ${nodeId}`);
-    requireExit(runInstalledCli(
-      cliBin,
-      ["runtime", "bridge", "--root", root, "--validate"],
-      consumerDirectory,
-      { env: environment },
-    ), 0, `packaged bridge validation ${nodeId}`);
     requireExit(runInstalledCli(
       cliBin,
       ["runtime", "dispatcher", "--root", root, "--validate"],

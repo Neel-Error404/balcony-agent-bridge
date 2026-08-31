@@ -75,7 +75,8 @@ shown above. Each command writes one JSON object to stdout unless noted.
 | `onboard export-enrollment ...` | `0` | `ok: true`, exact local `node_id`/`key_id`, and requested `output_path`; the output contains public enrollment only. |
 | `onboard import-peer ...` | `0` | `ok: true`, exact `imported_peer_id`, `membership_ready: true`, and `status: "complete"`. |
 | `onboard configure-transport --local-only` | `0` | `ok: true`, `transport.configured: true`, and `transport.local_only: true`; no Azure mutation. |
-| `onboard configure-dispatcher ...` | `0` | `ok: true`, `dispatcher.configured: true`, pinned executable hashes, project registry path, and dedicated Codex home. |
+| First `onboard configure-dispatcher ...` on a fresh root | `1` | `ok: false`, `authentication_required: true`, and the exact protected `codex_home`; no dispatcher state is written. |
+| `onboard configure-dispatcher ...` after `codex login` in that home | `0` | `ok: true`, `dispatcher.configured: true`, pinned executable hashes, project registry path, and the same dedicated Codex home. |
 | `onboard configure-mcp ...` | `0` | `ok: true` and `mcp.configured: true` in the dedicated Codex home. |
 | `runtime bridge ... --validate` | `0` | `ok: true` and `runtime: "bridge"`; no foreground loop is started. |
 | `runtime dispatcher ... --validate` | `0` | `ok: true` and `runtime: "dispatcher"`; no foreground loop is started. |
@@ -135,9 +136,18 @@ resources, grants RBAC, installs services, or accepts client secrets,
 connection strings, SAS keys, or certificate contents.
 
 Configure the read-only Codex dispatcher for one explicitly readable local
-project, then register the local MCP server:
+project. On the first run, the command creates the protected dedicated Codex
+home, returns `authentication_required: true` with its exact `codex_home`, and
+exits `1` without configuring the dispatcher. Authenticate that home, then
+rerun the same dispatcher command and register the local MCP server:
 
 ```powershell
+$codexHome = (balcony-agent-bridge onboard configure-dispatcher `
+  --root C:\BalconyPilot-R2 `
+  --project-key pilot-project `
+  --project-path C:\absolute\path\to\readable-project | ConvertFrom-Json).codex_home
+$env:CODEX_HOME = $codexHome
+codex login
 balcony-agent-bridge onboard configure-dispatcher `
   --root C:\BalconyPilot-R2 `
   --project-key pilot-project `
@@ -149,7 +159,9 @@ On Windows, the dispatcher command finds the globally installed Codex native
 binary and its `codex-code-mode-host.exe` companion, pins both SHA-256 values,
 and creates a dedicated ACL-protected Codex home beneath
 `%ProgramData%\Balcony\AgentBridge\codex-homes`. MCP registration is written
-to that dedicated home with a secret-scrubbed process environment. An exact
+to that dedicated home only after its `auth.json` is a regular, non-symlinked
+authenticated Codex state. The command never copies credentials from the
+operator's normal Codex home. MCP uses a secret-scrubbed process environment. An exact
 existing registration is verified and adopted after an interrupted local-state
 write; a contradictory registration fails closed and is never overwritten. If discovery is ambiguous, pass both
 `--codex-executable` and `--code-mode-host-executable` explicitly.

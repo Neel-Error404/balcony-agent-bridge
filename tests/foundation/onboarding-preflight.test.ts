@@ -34,7 +34,7 @@ describe("onboarding preflight", () => {
         npm: { available: true, version: "10.9.2", globalPrefix: "c:\\npm\\bin" },
         powershell: { available: true, version: "7.5.2" },
         git: { available: true, version: "2.50.0.windows.1" },
-        codex: { available: true, version: "0.2.0" },
+        codex: { available: true, version: "0.150.1" },
       }),
     });
 
@@ -53,6 +53,32 @@ describe("onboarding preflight", () => {
     ]));
     expect(JSON.stringify(report)).not.toContain("C:\\npm");
     expect(JSON.stringify(report)).not.toContain("windows.1");
+  });
+
+  it("requires the exact supported Codex release", () => {
+    const { pilotRoot, packageRoot } = createRuntimeFixture();
+    const report = runPreflight({
+      pilotRoot,
+      packageRoot,
+      platform: "win32",
+      env: { Path: "C:\\npm\\bin" },
+      now: () => new Date("2026-08-28T12:00:00.000Z"),
+      probeCommand: commandProbe({
+        node: { available: true, version: "v22.14.0" },
+        npm: { available: true, version: "10.9.2", globalPrefix: "C:\\npm\\bin" },
+        powershell: { available: true, version: "7.5.2" },
+        git: { available: true, version: "2.50.0.windows.1" },
+        codex: { available: true, version: "0.150.2" },
+      }),
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      id: "codex",
+      status: "FAIL",
+      observed: "0.150.2",
+      remediation: expect.stringContaining("@openai/codex@0.150.1"),
+    }));
   });
 
   it("handles Windows PATH casing and reports safe actionable failures", () => {
@@ -109,7 +135,7 @@ describe("onboarding preflight", () => {
         npm: { available: true, version: "10.9.2", globalPrefix: "/usr" },
         powershell: { available: true, version: "7.5.2" },
         git: { available: true, version: "2.50.0" },
-        codex: { available: true, version: "0.2.0" },
+        codex: { available: true, version: "0.150.1" },
       }),
     });
 

@@ -34,7 +34,9 @@ import {
   configureDispatcher,
   configureMcp,
   configureTransport,
+  prepareDispatcherAuthentication,
   readRuntimeSettings,
+  verifyMcpRegistration,
 } from "../onboarding/runtime-settings.js";
 import {
   buildBridgeLaunch,
@@ -413,6 +415,18 @@ function runOnboard(args: readonly string[]): void {
           "--codex-executable and --code-mode-host-executable must be supplied together",
         );
       }
+      const authentication = prepareDispatcherAuthentication(manifestPath);
+      if (!authentication.authenticated) {
+        writeJson({
+          ok: false,
+          authentication_required: true,
+          codex_home: authentication.codexHome,
+          next_step:
+            "Set CODEX_HOME to codex_home, run codex login, then rerun configure-dispatcher.",
+        });
+        process.exitCode = 1;
+        return;
+      }
       const discovered = values["codex-executable"] &&
           values["code-mode-host-executable"]
         ? undefined
@@ -458,6 +472,12 @@ function runOnboard(args: readonly string[]): void {
       const ok = report.status === "complete" && Boolean(
         settings.transport && settings.dispatcher && settings.mcp,
       );
+      if (ok) {
+        verifyMcpRegistration({
+          manifestPath,
+          packageRoot: installedPackageRoot(),
+        });
+      }
       writeJson({
         ok,
         status: report.status,
@@ -500,7 +520,14 @@ function runForegroundRuntime(args: readonly string[]): void {
   if (!values.root) throw new CliUsageError("runtime requires --root");
   const root = requireAbsolute(values.root, "--root");
   const manifestPath = path.join(root, "onboarding-manifest.json");
-  const manifest = readOnboardingManifest(manifestPath);
+  const onboarding = resumeOnboarding(manifestPath);
+  if (onboarding.status !== "complete" || onboarding.issues.length > 0) {
+    throw new StateTransitionError(
+      "Complete and verify onboarding artifacts before starting a runtime",
+    );
+  }
+  const manifest = onboarding.manifest;
+  assertSystemIdMatchesProcessIdentity(manifest.node_id);
   const settings = readRuntimeSettings(manifestPath);
   if (!settings.transport) {
     throw new CliUsageError("configure transport before starting a runtime");

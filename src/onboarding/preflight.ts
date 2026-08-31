@@ -43,6 +43,7 @@ export interface PreflightOptions {
 const MIN_NODE_MAJOR = 22;
 const MIN_NPM_MAJOR = 10;
 const MIN_POWERSHELL_MAJOR = 7;
+const SUPPORTED_CODEX_VERSION = "0.150.1";
 const CLOCK_MIN_MS = Date.UTC(2020, 0, 1);
 const CLOCK_MAX_MS = Date.UTC(2100, 0, 1);
 
@@ -85,11 +86,11 @@ export function runPreflight(options: PreflightOptions): PreflightReport {
     true,
     "Install Git and ensure the git executable is available on PATH.",
   ));
-  checks.push(commandPresenceCheck(
+  checks.push(exactVersionCheck(
     "codex",
     commandResults.get("codex")!,
-    true,
-    "Install Codex or make the codex executable available on PATH before the MCP pilot.",
+    SUPPORTED_CODEX_VERSION,
+    "Install @openai/codex@0.150.1 and ensure the codex executable is available on PATH before the MCP pilot.",
   ));
   checks.push(npmGlobalBinCheck(
     commandResults.get("npm")!,
@@ -150,6 +151,23 @@ function commandPresenceCheck(
     id,
     required,
     status: probe.available ? "PASS" : required ? "FAIL" : "WARN",
+    observed: probe.available ? safeVersion(probe.version) : "unavailable",
+    remediation,
+  };
+}
+
+function exactVersionCheck(
+  id: string,
+  probe: PreflightCommandProbe,
+  supportedVersion: string,
+  remediation: string,
+): PreflightCheck {
+  const parsed = parseVersion(probe.version);
+  const supported = parsed?.display === supportedVersion && !parsed.prerelease;
+  return {
+    id,
+    required: true,
+    status: probe.available && supported ? "PASS" : "FAIL",
     observed: probe.available ? safeVersion(probe.version) : "unavailable",
     remediation,
   };
@@ -299,11 +317,15 @@ function safeProbe(
   }
 }
 
-function parseVersion(value: string | undefined): { major: number; display: string } | undefined {
+function parseVersion(value: string | undefined): {
+  major: number;
+  display: string;
+  prerelease: boolean;
+} | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const match = value.trim().match(/(?:^|\s)v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/u);
+  const match = value.trim().match(/(?:^|\s)v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[0-9A-Za-z.-]+)?/u);
   if (!match) {
     return undefined;
   }
@@ -313,7 +335,11 @@ function parseVersion(value: string | undefined): { major: number; display: stri
   }
   const minor = match[2] ?? "0";
   const patch = match[3] ?? "0";
-  return { major, display: `${major}.${minor}.${patch}` };
+  return {
+    major,
+    display: `${major}.${minor}.${patch}`,
+    prerelease: match[4] !== undefined,
+  };
 }
 
 function safeVersion(value: string | undefined): string {

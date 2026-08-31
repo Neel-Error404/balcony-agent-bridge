@@ -10,13 +10,16 @@ import {
   configureDispatcher,
   configureMcp,
   configureTransport,
+  prepareDispatcherAuthentication,
   readRuntimeSettings,
+  verifyMcpRegistration,
 } from "../../src/onboarding/runtime-settings.js";
 import {
   exportPublicEnrollment,
   generateOnboardingIdentity,
   importPublicEnrollment,
   readOnboardingManifest,
+  prepareIdentityDirectory,
   startOnboarding,
   statusOnboarding,
   writeMembershipPolicy,
@@ -39,8 +42,8 @@ describe("onboarding runtime settings", () => {
     const first = configureTransport({
       manifestPath,
       packageRoot: path.resolve(import.meta.dirname, "../.."),
-      subscriptionName: "node-a",
-      topicName: "agent-messages",
+      subscriptionName: " node-a ",
+      topicName: " agent-messages ",
       authMode: "managed_identity",
       localOnly: true,
     });
@@ -55,6 +58,8 @@ describe("onboarding runtime settings", () => {
 
     expect(first).toEqual(second);
     expect(first.transport.configured).toBe(true);
+    expect(first.transport.topic_name).toBe("agent-messages");
+    expect(first.transport.subscription_name).toBe("node-a");
     expect(fs.existsSync(first.transport.profile_path)).toBe(true);
     expect(fs.existsSync(first.transport.database_path)).toBe(true);
     expect(JSON.stringify(first)).not.toMatch(/PRIVATE KEY|client_secret|connection_string/iu);
@@ -156,14 +161,24 @@ describe("onboarding runtime settings", () => {
     expect(mcpRunner.calls[0]?.env["AZURE_CLIENT_SECRET"]).toBeUndefined();
     expect(registered.mcp.configured).toBe(true);
     expect(readRuntimeSettings(manifestPath)).toEqual(registered);
+    expect(verifyMcpRegistration({
+      manifestPath,
+      packageRoot: path.resolve(import.meta.dirname, "../.."),
+      runCodex: mcpRunner.run,
+    })).toBeUndefined();
+    expect(() => verifyMcpRegistration({
+      manifestPath,
+      packageRoot: path.resolve(import.meta.dirname, "../.."),
+      runCodex: createMcpRunner(manifestPath).run,
+    })).toThrow(expect.objectContaining({ code: "RUNTIME_SETTINGS_CONFLICT" }));
     expect(configureMcp({
       manifestPath,
       codexExecutable,
       packageRoot: path.resolve(import.meta.dirname, "../.."),
       runCodex: mcpRunner.run,
     })).toEqual(registered);
-    expect(mcpRunner.calls).toHaveLength(4);
-    expect(mcpRunner.calls[3]?.args).toEqual([
+    expect(mcpRunner.calls).toHaveLength(5);
+    expect(mcpRunner.calls[4]?.args).toEqual([
       "mcp",
       "get",
       "balcony-agent-bridge",
@@ -322,6 +337,82 @@ describe("onboarding runtime settings", () => {
     expect(() => readRuntimeSettings(manifestPath)).toThrow(
       expect.objectContaining({ code: "RUNTIME_SETTINGS_INVALID" }),
     );
+  }, 45_000);
+
+  it("fails verification when the configured client certificate is missing", () => {
+    const manifestPath = completeOnboarding();
+    const root = path.dirname(manifestPath);
+    const certificatePath = path.join(root, "client.pem");
+    fs.writeFileSync(certificatePath, "certificate");
+    configureTransport({
+      manifestPath,
+      packageRoot: path.resolve(import.meta.dirname, "../.."),
+      topicName: " agent-messages ",
+      subscriptionName: " node-a ",
+      serviceBusNamespace: " bridge.servicebus.windows.net ",
+      authMode: "client_certificate",
+      azureTenantId: "00000000-0000-4000-8000-000000000001",
+      azureClientId: "00000000-0000-4000-8000-000000000002",
+      azureClientCertificatePath: certificatePath,
+    });
+    expect(readRuntimeSettings(manifestPath).transport).toMatchObject({
+      topic_name: "agent-messages",
+      subscription_name: "node-a",
+      servicebus_namespace: "bridge.servicebus.windows.net",
+    });
+
+    fs.rmSync(certificatePath);
+
+    expect(() => readRuntimeSettings(manifestPath)).toThrow(
+      expect.objectContaining({ code: "RUNTIME_SETTINGS_CONFLICT" }),
+    );
+  }, 45_000);
+
+  it("requires authentication in the dedicated Codex home before dispatcher setup", () => {
+    const manifestPath = completeOnboarding();
+    const root = path.dirname(manifestPath);
+    configureTransport({
+      manifestPath,
+      packageRoot: path.resolve(import.meta.dirname, "../.."),
+      authMode: "managed_identity",
+      localOnly: true,
+    });
+    fs.rmSync(path.join(dedicatedCodexHome(root), "auth.json"));
+    const bin = createCodexBundle(root);
+    const projectPath = path.join(root, "project");
+    fs.mkdirSync(projectPath);
+
+    expect(() => configureDispatcher({
+      manifestPath,
+      projectKey: "pilot-project",
+      projectPath,
+      ...bin,
+    })).toThrow(expect.objectContaining({
+      code: "DISPATCHER_CONFIGURATION_INVALID",
+    }));
+  }, 45_000);
+
+  it("surfaces the protected Codex home for explicit owner authentication", () => {
+    const manifestPath = completeOnboarding();
+    const codexHome = dedicatedCodexHome(path.dirname(manifestPath));
+    fs.rmSync(path.join(codexHome, "auth.json"));
+
+    expect(prepareDispatcherAuthentication(manifestPath)).toEqual({
+      codexHome,
+      authenticated: false,
+    });
+    fs.writeFileSync(
+      path.join(codexHome, "auth.json"),
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: { access_token: "test-access-token" },
+      }),
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+    expect(prepareDispatcherAuthentication(manifestPath)).toEqual({
+      codexHome,
+      authenticated: true,
+    });
   }, 45_000);
 
   it("recovers an interrupted runtime-settings manifest update", () => {
@@ -483,7 +574,37 @@ function completeOnboarding(): string {
     expectedPeerId: "node-b",
   });
   writeMembershipPolicy(manifest.manifestPath);
+  const codexHome = dedicatedCodexHome(root);
+  prepareIdentityDirectory(codexHome);
+  fs.writeFileSync(
+    path.join(codexHome, "auth.json"),
+    JSON.stringify({
+      auth_mode: "chatgpt",
+      tokens: {
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+      },
+    }),
+    { encoding: "utf8", flag: "wx", mode: 0o600 },
+  );
+  protectedDirectories.push(codexHome);
   return manifest.manifestPath;
+}
+
+function dedicatedCodexHome(root: string): string {
+  if (process.platform !== "win32") return path.join(root, "codex-home");
+  const protectedDataRoot = process.env["ProgramData"] ?? "C:\\ProgramData";
+  const rootId = createHash("sha256")
+    .update(root.toLowerCase())
+    .digest("hex")
+    .slice(0, 16);
+  return path.join(
+    protectedDataRoot,
+    "Balcony",
+    "AgentBridge",
+    "codex-homes",
+    `node-a-${rootId}`,
+  );
 }
 
 function makeEnrollment() {
