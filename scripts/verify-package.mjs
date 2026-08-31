@@ -143,8 +143,10 @@ if (installCheck) {
 process.stdout.write(`${JSON.stringify(result)}\n`);
 
 function runInstallSmoke(useCleanCache) {
-  const temporaryDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "balcony-agent-bridge-package-"),
+  const temporaryDirectory = fs.realpathSync.native(
+    fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-agent-bridge-package-"),
+    ),
   );
   let identityDirectory;
   const onboardingIdentityDirectories = [];
