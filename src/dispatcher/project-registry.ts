@@ -35,7 +35,7 @@ const PinnedProjectEntrySchema = ProjectEntrySchema.extend({
     .strict(),
 }).strict();
 
-const ProjectRegistrySchema = z.discriminatedUnion(
+export const ProjectRegistrySchema = z.discriminatedUnion(
   "schema_version",
   [
     z

@@ -10,12 +10,11 @@ authorized nodes, direct one-to-one routing, one production transport, and an
 optional read-only Codex dispatcher. It is not a hosted discovery service, a
 file-sync product, or a writable remote-execution platform.
 
-This repository is public under Apache-2.0, and version `0.2.0` is approved for
-public npm distribution as an alpha. Anyone may clone, build, inspect, modify,
-and use it under that license. The npm artifact is for local CLI and MCP
-evaluation; production service installation remains a reviewed source
-operation because the package intentionally excludes infrastructure and
-Windows service-management scripts.
+This repository is public under Apache-2.0, and version `0.3.0` is the npm-first
+beta onboarding release. Anyone may clone, build, inspect, modify, and use it
+under that license. The npm artifact supports local setup, MCP registration,
+and foreground bridge/dispatcher operation. Elevated Windows service
+installation and Azure provisioning remain separately reviewed owner actions.
 
 ## Install
 
@@ -28,17 +27,17 @@ Requirements:
 - Azure access only when deliberately deploying or checking the production
   transport.
 
-After the registry reports version `0.2.0`, install the public CLI and MCP
+After the registry reports version `0.3.0`, install the public CLI and MCP
 package:
 
 ```powershell
-npm view balcony-agent-bridge@0.2.0 version
+npm view balcony-agent-bridge@0.3.0 version
 if ($LASTEXITCODE -ne 0) {
-  throw "Unable to confirm balcony-agent-bridge@0.2.0 in the npm registry; registry installation is unavailable."
+  throw "Unable to confirm balcony-agent-bridge@0.3.0 in the npm registry; registry installation is unavailable."
 }
-npm install --global balcony-agent-bridge@0.2.0
+npm install --global balcony-agent-bridge@0.3.0
 if ($LASTEXITCODE -ne 0) {
-  throw "Unable to install balcony-agent-bridge@0.2.0 from the npm registry; registry installation is unavailable."
+  throw "Unable to install balcony-agent-bridge@0.3.0 from the npm registry; registry installation is unavailable."
 }
 $globalNodeModules = npm root --global
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($globalNodeModules)) {
@@ -50,12 +49,12 @@ if (-not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {
   throw "The installed balcony-agent-bridge package manifest is missing; registry installation is unavailable."
 }
 $installedPackage = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json
-if ($installedPackage.version -ne "0.2.0") {
-  throw "The installed balcony-agent-bridge version is not 0.2.0; registry installation is unavailable."
+if ($installedPackage.version -ne "0.3.0") {
+  throw "The installed balcony-agent-bridge version is not 0.3.0; registry installation is unavailable."
 }
 $bridgeCli = Join-Path $packageDirectory "dist/cli/index.js"
 if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
-  throw "The installed balcony-agent-bridge@0.2.0 CLI entrypoint is missing; registry installation is unavailable."
+  throw "The installed balcony-agent-bridge@0.3.0 CLI entrypoint is missing; registry installation is unavailable."
 }
 $nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
 if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
@@ -65,11 +64,11 @@ if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
 $cliStarted = $?
 $cliExitCode = $LASTEXITCODE
 if (-not $cliStarted -or $cliExitCode -ne 0) {
-  throw "The installed balcony-agent-bridge@0.2.0 CLI did not start; registry installation is unavailable."
+  throw "The installed balcony-agent-bridge@0.3.0 CLI did not start; registry installation is unavailable."
 }
 ```
 
-Source installation is available only after GitHub exposes the `v0.2.0` release
+Source installation is available only after GitHub exposes the `v0.3.0` release
 tag. Fetch tags, stop clearly if that tag is unavailable, then check out the
 reviewed tag detached before installing dependencies:
 
@@ -83,12 +82,12 @@ git fetch --tags --force
 if ($LASTEXITCODE -ne 0) {
   throw "Unable to fetch GitHub release tags; source installation is unavailable."
 }
-if (-not (git tag --list v0.2.0)) {
-  throw "GitHub has not exposed the v0.2.0 release tag; source installation is unavailable."
+if (-not (git tag --list v0.3.0)) {
+  throw "GitHub has not exposed the v0.3.0 release tag; source installation is unavailable."
 }
-git checkout --detach v0.2.0
+git checkout --detach v0.3.0
 if ($LASTEXITCODE -ne 0) {
-  throw "Unable to check out the v0.2.0 release tag; source installation is unavailable."
+  throw "Unable to check out the v0.3.0 release tag; source installation is unavailable."
 }
 npm ci
 if ($LASTEXITCODE -ne 0) {
@@ -96,7 +95,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 npm run build
 if ($LASTEXITCODE -ne 0) {
-  throw "Unable to build the v0.2.0 source checkout; source installation is unavailable."
+  throw "Unable to build the v0.3.0 source checkout; source installation is unavailable."
 }
 $nodePath = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Path
 if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
@@ -110,7 +109,7 @@ if (-not (Test-Path -LiteralPath $bridgeCli -PathType Leaf)) {
 $cliStarted = $?
 $cliExitCode = $LASTEXITCODE
 if (-not $cliStarted -or $cliExitCode -ne 0) {
-  throw "The built balcony-agent-bridge@0.2.0 CLI did not start; source installation is unavailable."
+  throw "The built balcony-agent-bridge@0.3.0 CLI did not start; source installation is unavailable."
 }
 ```
 
@@ -122,7 +121,7 @@ To evaluate the exact npm artifact from a source checkout:
 
 ```powershell
 npm pack
-$tarball = (Resolve-Path .\balcony-agent-bridge-0.2.0.tgz).Path
+$tarball = (Resolve-Path .\balcony-agent-bridge-0.3.0.tgz).Path
 $consumer = Join-Path $env:TEMP ("balcony-agent-bridge-consumer-" + [guid]::NewGuid())
 try {
   New-Item -ItemType Directory -Force -Path $consumer | Out-Null
@@ -147,9 +146,30 @@ this release candidate has only been verified on Windows; translate paths and
 shell syntax before evaluating it elsewhere.
 
 The artifact contains compiled runtime files, the README, license, security
-policy, package metadata, and sanitized examples. It excludes source, tests,
-infrastructure, service scripts, internal evidence, databases, and local
+policy, package metadata, sanitized examples, and every referenced onboarding,
+security, and runbook document. It excludes source, tests, infrastructure,
+service scripts, internal verification evidence, databases, and local
 configuration.
+
+## npm-first two-node onboarding
+
+The supported first-user flow is documented end to end in
+[docs/npm-first-onboarding.md](docs/npm-first-onboarding.md). It covers
+preflight, protected identity generation, public enrollment exchange,
+deterministic membership, local profile creation, Codex MCP registration,
+and foreground bridge/dispatcher validation without a source checkout.
+
+Start with a fresh root on each node:
+
+```powershell
+New-Item -ItemType Directory -Path C:\BalconyPilot-R2 -ErrorAction Stop | Out-Null
+balcony-agent-bridge preflight --root C:\BalconyPilot-R2
+$env:BALCONY_SYSTEM_ID = "pilot-a"
+balcony-agent-bridge onboard start --root C:\BalconyPilot-R2 --node-id pilot-a --network-id balcony-pilot --peer-id pilot-b
+```
+
+Run `balcony-agent-bridge onboard --help` and follow the packaged guide. No
+onboarding command provisions Azure or installs a Windows service.
 
 ## Try The Local Demo
 
@@ -212,11 +232,12 @@ subscription. The templates create no identities and contain no credentials.
    and role assignment.
 5. Deploy only after the owner separately approves the Azure mutation.
 
-`infra/README.md` is the authoritative deployment sequence. The example
+The source repository's infrastructure README is the authoritative deployment
+sequence. The example
 `docs/examples/three-node-topology.md` shows the exact three-node mapping.
 Nothing in install, setup, demo, or package verification deploys Azure.
 
-## Connect The Node
+## Source-managed Windows service path
 
 Create a signing identity in an absolute machine-local directory outside every
 repository. Before running this command, complete the pre-generation Windows
@@ -321,14 +342,14 @@ operating-system VM.
 ## Upgrade
 
 There is no supported in-place production bridge-service upgrade or downgrade
-in v0.2. Do not rerun the initial installer over an existing service. Before an
+in v0.3. Do not rerun the initial installer over an existing service. Before an
 owner-defined replacement procedure:
 
 1. Stop the bridge, MCP client, and optional dispatcher so every SQLite writer
    is quiesced.
 2. Preserve the database, profile, membership policy, service configuration,
    and previous reviewed source/runtime outside Git and outside other nodes.
-3. Run the ordered checks in `docs/release-manifest-v0.2.md` against the new
+3. Run the ordered checks in `docs/release-manifest-v0.3.md` against the new
    revision.
 4. Treat the retained runtime and state as the rollback point. The replacement
    procedure and any service re-registration require separate owner review.
@@ -465,11 +486,11 @@ npm run verify:public-alpha
 ```
 
 Stop on the first unexplained failure, fix its root cause, and rerun that same
-level. `docs/release-manifest-v0.2.md` separates locally verifiable checks from
+level. `docs/release-manifest-v0.3.md` separates locally verifiable checks from
 owner-gated Git history, publication, Azure, service, and live multi-node
 checks.
 
-The source repository is public and version `0.2.0` is the approved npm and
+The source repository is public and version `0.3.0` is the approved npm and
 GitHub release target. Confirm external package availability with `npm view`.
 The commands above do not deploy Azure resources, install a service, change
 RBAC, or alter a live bridge. See `SECURITY.md` before reporting a vulnerability

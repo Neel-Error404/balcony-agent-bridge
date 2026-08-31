@@ -517,8 +517,9 @@ export function requireServiceBusNamespace(config: BridgeConfig): string {
 
 export function loadReadOnlyDispatcherConfig(
   environment: NodeJS.ProcessEnv = process.env,
+  bridgeConfig?: BridgeConfig,
 ): ReadOnlyDispatcherConfig {
-  const bridge = loadConfig(environment);
+  const bridge = bridgeConfig ?? loadConfig(environment);
   const result = DispatcherEnvironmentSchema.safeParse(environment);
   if (!result.success) {
     const detail = result.error.issues

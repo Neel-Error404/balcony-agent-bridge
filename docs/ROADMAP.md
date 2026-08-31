@@ -26,12 +26,14 @@ Git history, and the dated verification records remain authoritative.
 | Phase 4 | Added Ed25519 whole-envelope authentication, explicit membership, ingress provenance, rotation/revocation guidance, and Windows ACL gates. | Production transport fails closed on spoofing, malformed authentication, and unsafe runtime inputs. |
 | Phase 5 | Reworked the README and runbooks around install, connect, verify, upgrade, recover, clean-consumer packaging, and known limitations. | PR #2 passed the ordered local verification and review cycle and merged as `2ab0b512`. |
 | Phase 6 | Closed the post-merge provisioning-identity gap and reconciled documentation with the repository's actual public state. | Implemented, verified, and merged; final delivery and review close-outs are recorded in Git history. |
+| npm-first onboarding | Added packaged documentation, guided resumable identity/enrollment/membership, MCP registration, preflight, and foreground bridge/dispatcher commands. | Version `0.3.0` release work is governed by `docs/release-manifest-v0.3.md`; Azure and Windows services remain owner-gated. |
 
 Current truth:
 
 - the GitHub source repository is public and Apache-2.0 licensed, so anyone can
   clone, build, modify, and use it from source;
-- version `0.2.0` is the approved Phase 2 npm and GitHub prerelease target;
+- version `0.2.0` is the published Phase 2 npm and GitHub prerelease baseline;
+- version `0.3.0` is the npm-first onboarding release target;
 - the generic multi-node design is locally verified, but it has not replaced
   the accepted two-machine live runtime or completed a live signed three-node
   acceptance test; and
@@ -72,7 +74,8 @@ in the isolated worktree.
 
 Status: implemented on 2026-08-25 and merged to the public repository on
 2026-08-26. Apache-2.0 is selected. The planned clean-export boundary was not
-completed before visibility changed, and npm installation remains unpublished.
+completed before visibility changed. npm publication was completed in the
+later release phases.
 
 - Audit the repository and Git history for credentials, private endpoints,
   machine-local configuration, private identities, and internal-only evidence.
@@ -167,7 +170,7 @@ Status: implemented, verified, and merged through PR #3 as `650c1773` on
 - Add negative integration coverage proving a mismatch fails with sanitized
   output and leaves the filesystem unchanged.
 - Reconcile README, security, contribution, release-boundary, and limitation
-  wording with the public GitHub repository and unpublished npm package.
+  wording with the public GitHub repository and the package state at that time.
 - Add canonical repository URLs to package metadata without enabling npm
   publication.
 - Record the completed public-safe journey and distinguish source availability,

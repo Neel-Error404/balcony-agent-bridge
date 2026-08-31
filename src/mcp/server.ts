@@ -22,7 +22,7 @@ const MessageKindArraySchema = z.array(MessageKindSchema).max(
 export function createMcpServer(service: AgentBridgeService): McpServer {
   const server = new McpServer({
     name: "balcony-agent-bridge-mcp-server",
-    version: "0.2.0",
+    version: "0.3.0",
   });
 
   server.registerTool(

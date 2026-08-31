@@ -1,6 +1,6 @@
 # Contributing
 
-Balcony Agent Bridge is a public `0.2.0` alpha under Apache-2.0. The npm package
+Balcony Agent Bridge is preparing the public `0.3.0` beta under Apache-2.0. The npm package
 contains the runtime CLI and MCP entrypoints; contributors build and test the
 complete project from source.
 
@@ -39,7 +39,13 @@ For package changes, also run:
 npm run check:secrets
 npm run verify:package
 npm run smoke:package
+npm run verify:public-alpha
 ```
+
+`smoke:package` validates an installed tarball without requiring every machine
+prerequisite to be present. `verify:public-alpha` is the release-environment
+gate and requires preflight to pass with Node, npm, PowerShell 7, Git, Codex,
+and the global npm bin correctly available.
 
 Stop on the first unexplained failure, fix its root cause, and rerun that same
 level before continuing.

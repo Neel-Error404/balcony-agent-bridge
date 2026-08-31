@@ -11,6 +11,7 @@ const repositoryRoot = path.resolve(
 );
 const installCheck = process.argv.includes("--install");
 const cleanCache = process.argv.includes("--clean-cache");
+const requirePreflight = process.argv.includes("--require-preflight");
 const npmCli = process.env.npm_execpath;
 const prepareIdentityDirectoryScript = String.raw`
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,9 @@ if ($LASTEXITCODE -ne 0) {
 
 if (cleanCache && !installCheck) {
   throw new Error("--clean-cache requires --install");
+}
+if (requirePreflight && !installCheck) {
+  throw new Error("--require-preflight requires --install");
 }
 
 if (!npmCli) {
@@ -76,6 +80,7 @@ const allowedRootFiles = new Set([
 const unexpectedFiles = packagedFiles.filter(
   (file) =>
     !file.startsWith("dist/") &&
+    !file.startsWith("docs/") &&
     !allowedRootFiles.has(file),
 );
 if (unexpectedFiles.length > 0) {
@@ -87,7 +92,6 @@ if (unexpectedFiles.length > 0) {
 const forbiddenPrefixes = [
   ".env",
   "AGENTS.md",
-  "docs/",
   "infra/",
   "scripts/",
   "service/",
@@ -139,10 +143,13 @@ if (installCheck) {
 process.stdout.write(`${JSON.stringify(result)}\n`);
 
 function runInstallSmoke(useCleanCache) {
-  const temporaryDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "balcony-agent-bridge-package-"),
+  const temporaryDirectory = fs.realpathSync.native(
+    fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-agent-bridge-package-"),
+    ),
   );
   let identityDirectory;
+  const onboardingIdentityDirectories = [];
   try {
     const packed = runNpm(
       [
@@ -567,10 +574,25 @@ function runInstallSmoke(useCleanCache) {
       consumerDirectory,
     );
     requireExit(invalid, 2, "packaged CLI invalid-command check");
+    verifyInstalledOnboarding({
+      cliBin,
+      consumerDirectory,
+      temporaryDirectory,
+      onboardingIdentityDirectories,
+      requirePreflight,
+    });
     return packedManifest;
   } finally {
     if (identityDirectory) {
       fs.rmSync(identityDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+    for (const directory of onboardingIdentityDirectories) {
+      fs.rmSync(directory, {
         recursive: true,
         force: true,
         maxRetries: 5,
@@ -804,16 +826,246 @@ function prepareIdentityDirectory(directory) {
 }
 
 function verifyPackagedReadmeLinks(packagedFiles) {
-  const readme = fs.readFileSync(path.join(repositoryRoot, "README.md"), "utf8");
-  const relativeLinks = [...readme.matchAll(/\[[^\]]+\]\((?!https?:\/\/|#)([^)]+)\)/giu)]
-    .map((match) => normalize(match[1]));
-  const missingLinks = relativeLinks.filter(
-    (link) => !packagedFiles.includes(link.replace(/^\.\//u, "")),
-  );
+  const packagedSet = new Set(packagedFiles);
+  const missingLinks = [];
+  const markdownFiles = packagedFiles.filter((file) => file.endsWith(".md"));
+  for (const markdownFile of markdownFiles) {
+    const source = fs.readFileSync(path.join(repositoryRoot, markdownFile), "utf8");
+    const markdownLinks = [...source.matchAll(/\[[^\]]+\]\((?!https?:\/\/|mailto:|#)([^)]+)\)/giu)]
+      .map((match) => match[1]);
+    const inlineDocumentReferences = [...source.matchAll(/(?:\.\/)?docs\/[a-z0-9._/-]+\.md/giu)]
+      .map((match) => match[0]);
+    for (const rawLink of new Set([...markdownLinks, ...inlineDocumentReferences])) {
+      const linkWithoutAnchor = normalize(rawLink.split("#", 1)[0].split("?", 1)[0]);
+      const resolvedLink = linkWithoutAnchor.startsWith("docs/")
+        ? linkWithoutAnchor
+        : normalize(path.posix.normalize(path.posix.join(path.posix.dirname(markdownFile), linkWithoutAnchor)));
+      if (!packagedSet.has(resolvedLink)) {
+        missingLinks.push(`${markdownFile} -> ${resolvedLink}`);
+      }
+    }
+  }
   if (missingLinks.length > 0) {
     throw new Error(
-      `Packaged README links to files outside the package: ${missingLinks.join(", ")}`,
+      `Packaged markdown links to files outside the package: ${missingLinks.join(", ")}`,
     );
+  }
+}
+
+function verifyInstalledOnboarding({
+  cliBin,
+  consumerDirectory,
+  temporaryDirectory,
+  onboardingIdentityDirectories,
+  requirePreflight,
+}) {
+  const onboardingRoot = path.join(temporaryDirectory, "npm-first-onboarding");
+  fs.mkdirSync(onboardingRoot);
+  const preflight = runInstalledCli(
+    cliBin,
+    ["preflight", "--root", onboardingRoot],
+    consumerDirectory,
+  );
+  if (![0, 1].includes(preflight.status)) {
+    requireExit(preflight, 0, "packaged onboarding preflight");
+  }
+  const preflightReport = JSON.parse(preflight.stdout);
+  const expectedChecks = [
+    "node_version",
+    "npm_version",
+    "powershell_version",
+    "git",
+    "codex",
+    "npm_global_bin_on_path",
+    "clock",
+    "pilot_root_writable",
+    "bridge_artifact",
+    "dispatcher_artifact",
+  ];
+  if (
+    typeof preflightReport.ok !== "boolean" ||
+    !Array.isArray(preflightReport.checks) ||
+    expectedChecks.some((name) =>
+      !preflightReport.checks.some((check) => check.id === name)
+    )
+  ) {
+    throw new Error("Packaged onboarding preflight report is incomplete");
+  }
+  if (requirePreflight && (preflight.status !== 0 || preflightReport.ok !== true)) {
+    throw new Error("Release-environment onboarding preflight did not pass");
+  }
+
+  const roots = {
+    "package-a": path.join(onboardingRoot, "package-a"),
+    "package-b": path.join(onboardingRoot, "package-b"),
+  };
+  const enrollments = {
+    "package-a": path.join(onboardingRoot, "package-a-public.json"),
+    "package-b": path.join(onboardingRoot, "package-b-public.json"),
+  };
+  for (const [nodeId, peerId] of [
+    ["package-a", "package-b"],
+    ["package-b", "package-a"],
+  ]) {
+    const environment = { ...process.env, BALCONY_SYSTEM_ID: nodeId };
+    const start = runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "start",
+        "--root",
+        roots[nodeId],
+        "--node-id",
+        nodeId,
+        "--network-id",
+        "package-verification",
+        "--peer-id",
+        peerId,
+      ],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(start, 0, `packaged onboarding start ${nodeId}`);
+    const manifestPath = JSON.parse(start.stdout).manifest_path;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    onboardingIdentityDirectories.push(manifest.identity_directory);
+    const exported = runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "export-enrollment",
+        "--root",
+        roots[nodeId],
+        "--output",
+        enrollments[nodeId],
+      ],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(exported, 0, `packaged enrollment export ${nodeId}`);
+  }
+
+  for (const [nodeId, peerId] of [
+    ["package-a", "package-b"],
+    ["package-b", "package-a"],
+  ]) {
+    const root = roots[nodeId];
+    const environment = { ...process.env, BALCONY_SYSTEM_ID: nodeId };
+    requireExit(runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "import-peer",
+        "--root",
+        root,
+        "--peer-id",
+        peerId,
+        "--enrollment",
+        enrollments[peerId],
+      ],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged peer import ${nodeId}`);
+    requireExit(runInstalledCli(
+      cliBin,
+      ["onboard", "configure-transport", "--root", root, "--local-only"],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged local transport configuration ${nodeId}`);
+    requireExit(runInstalledCli(
+      cliBin,
+      ["runtime", "bridge", "--root", root, "--validate"],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged bridge validation ${nodeId}`);
+    if (!requirePreflight) {
+      continue;
+    }
+    let dispatcherConfiguration = runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "configure-dispatcher",
+        "--root",
+        root,
+        "--project-key",
+        "package-consumer",
+        "--project-path",
+        consumerDirectory,
+      ],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(
+      dispatcherConfiguration,
+      1,
+      `packaged dispatcher authentication preparation ${nodeId}`,
+    );
+    const authentication = JSON.parse(dispatcherConfiguration.stdout);
+    if (
+      authentication.ok !== false ||
+      authentication.authentication_required !== true ||
+      typeof authentication.codex_home !== "string"
+    ) {
+      throw new Error(
+        `Packaged dispatcher did not surface dedicated-home authentication for ${nodeId}`,
+      );
+    }
+    const codexHome = authentication.codex_home;
+    onboardingIdentityDirectories.push(codexHome);
+    fs.writeFileSync(
+      path.join(codexHome, "auth.json"),
+      `${JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: { access_token: "package-verification-placeholder" },
+      })}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+    dispatcherConfiguration = runInstalledCli(
+      cliBin,
+      [
+        "onboard",
+        "configure-dispatcher",
+        "--root",
+        root,
+        "--project-key",
+        "package-consumer",
+        "--project-path",
+        consumerDirectory,
+      ],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(
+      dispatcherConfiguration,
+      0,
+      `packaged dispatcher configuration ${nodeId}`,
+    );
+    if (JSON.parse(dispatcherConfiguration.stdout).dispatcher.codex_home !== codexHome) {
+      throw new Error(`Packaged dispatcher changed its dedicated Codex home for ${nodeId}`);
+    }
+    requireExit(runInstalledCli(
+      cliBin,
+      ["onboard", "configure-mcp", "--root", root],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged MCP registration ${nodeId}`);
+    requireExit(runInstalledCli(
+      cliBin,
+      ["runtime", "dispatcher", "--root", root, "--validate"],
+      consumerDirectory,
+      { env: environment },
+    ), 0, `packaged dispatcher validation ${nodeId}`);
+    const verified = runInstalledCli(
+      cliBin,
+      ["onboard", "verify", "--root", root],
+      consumerDirectory,
+      { env: environment },
+    );
+    requireExit(verified, 0, `packaged onboarding verification ${nodeId}`);
+    if (JSON.parse(verified.stdout).ok !== true) {
+      throw new Error(`Packaged onboarding did not verify ${nodeId}`);
+    }
   }
 }
 

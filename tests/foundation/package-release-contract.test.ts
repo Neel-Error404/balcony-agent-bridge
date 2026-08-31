@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 interface PackageManifest {
+  version?: string;
   private?: boolean;
   license?: string;
   files?: string[];
@@ -34,6 +35,20 @@ describe("npm release boundary", () => {
     expect(manifest.files).toEqual([
       "dist",
       "LICENSE",
+      "docs/architecture.md",
+      "docs/configuration.md",
+      "docs/examples/three-node-topology.md",
+      "docs/known-limitations.md",
+      "docs/message-authentication.md",
+      "docs/npm-first-onboarding.md",
+      "docs/release-manifest-v0.2.md",
+      "docs/release-manifest-v0.3.md",
+      "docs/ROADMAP.md",
+      "docs/runbooks/read-only-dispatcher.md",
+      "docs/runbooks/recovery.md",
+      "docs/runbooks/windows-service.md",
+      "docs/threat-model.md",
+      "docs/troubleshooting.md",
       "config/codex-mcp.example.toml",
       "config/dispatcher-projects.example.json",
       "SECURITY.md",
@@ -64,7 +79,7 @@ describe("npm release boundary", () => {
       "npm run build && node scripts/verify-package.mjs --install",
     );
     expect(manifest.scripts?.["verify:public-alpha"]).toBe(
-      "npm run build && node scripts/verify-package.mjs --install --clean-cache",
+      "npm run build && node scripts/verify-package.mjs --install --clean-cache --require-preflight",
     );
     expect(manifest.scripts?.["check:secrets"]).toBe(
       "node scripts/check-public-safety.mjs --history",
@@ -75,6 +90,33 @@ describe("npm release boundary", () => {
     expect(fs.readFileSync(path.join(repositoryRoot, "LICENSE"), "utf8")).toContain(
       "Apache License",
     );
+  });
+
+  it("ships every onboarding and security document referenced by packaged markdown", () => {
+    const manifest = readPackageManifest();
+    const packagedEntries = new Set(manifest.files ?? []);
+    const documentationSources = ["README.md", "SECURITY.md"];
+    const referencedDocuments = new Set<string>();
+
+    for (const sourcePath of documentationSources) {
+      const source = fs.readFileSync(path.join(repositoryRoot, sourcePath), "utf8");
+      for (const match of source.matchAll(/docs\/[a-z0-9._/-]+\.md/giu)) {
+        referencedDocuments.add(match[0]!.replaceAll("\\", "/"));
+      }
+    }
+
+    expect(referencedDocuments.size).toBeGreaterThan(0);
+    for (const referencedDocument of referencedDocuments) {
+      const isPackaged = [...packagedEntries].some((entry) =>
+        entry === referencedDocument ||
+        (entry.endsWith("/") && referencedDocument.startsWith(entry))
+      );
+      expect(isPackaged, `${referencedDocument} must be shipped`).toBe(true);
+      expect(
+        fs.existsSync(path.join(repositoryRoot, referencedDocument)),
+        `${referencedDocument} must exist`,
+      ).toBe(true);
+    }
   });
 
   it("keeps every packaged executable directly runnable by Node", () => {
@@ -90,5 +132,15 @@ describe("npm release boundary", () => {
         true,
       );
     }
+  });
+
+  it("pins CI to the verified Windows Node runtime", () => {
+    const workflow = fs.readFileSync(
+      path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("runs-on: windows-2022");
+    expect(workflow).toContain("node-version: 22.14.0");
   });
 });

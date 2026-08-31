@@ -2,8 +2,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
 
 import {
   LocalCodexExecutor,
@@ -11,10 +20,19 @@ import {
 } from "../../src/dispatcher/codex-executor.js";
 
 describe("LocalCodexExecutor process boundary", () => {
+  let fixtureBuildDirectory: string;
+  let fixtureTemplate: string;
   let temporaryDirectory: string;
   let projectDirectory: string;
   let codexHome: string;
   let codeModeHost: string;
+
+  beforeAll(() => {
+    fixtureBuildDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-native-fixture-"),
+    );
+    fixtureTemplate = compileNativeFixture(fixtureBuildDirectory);
+  }, 30_000);
 
   beforeEach(() => {
     temporaryDirectory = fs.mkdtempSync(
@@ -32,24 +50,28 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  });
+    fs.rmSync(temporaryDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    });
+  }, 30_000);
+
+  afterAll(() => {
+    fs.rmSync(fixtureBuildDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    });
+  }, 30_000);
 
   it("uses fixed read-only arguments, stdin prompts, and a minimal environment", async () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "inspect.ps1",
-      [
-        "$prompt = $input | Out-String",
-        "$result = @{",
-        "  arguments = @($args)",
-        "  prompt = $prompt",
-        "  codexHome = $env:CODEX_HOME",
-        "  bridgeNamespace = $env:BALCONY_SERVICEBUS_NAMESPACE",
-        "  azureSecret = $env:AZURE_CLIENT_SECRET",
-        "}",
-        "$result | ConvertTo-Json -Compress",
-      ],
+      "inspect",
     );
     const executor = new LocalCodexExecutor(
       executable,
@@ -110,13 +132,10 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   it("disables local file-reading tools for evidence-only execution", async () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "evidence-only.ps1",
-      [
-        "$prompt = $input | Out-String",
-        "@{ arguments = @($args); prompt = $prompt } | ConvertTo-Json -Compress",
-      ],
+      "evidence-only",
     );
     const executor = new LocalCodexExecutor(
       executable,
@@ -158,14 +177,10 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   it("terminates a worker that exceeds its timeout", async () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "hang.ps1",
-      [
-        "$input | Out-Null",
-        "Start-Sleep -Seconds 30",
-        "Write-Output 'late output'",
-      ],
+      "hang",
     );
     const executor = new LocalCodexExecutor(
       executable,
@@ -191,28 +206,10 @@ describe("LocalCodexExecutor process boundary", () => {
 
   it("terminates a worker when the dispatcher is shutting down", async () => {
     const marker = path.join(temporaryDirectory, "orphan-marker.txt");
-    const childScript = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "abort-child.ps1",
-      [
-        "Start-Sleep -Seconds 2",
-        `Set-Content -LiteralPath ${powerShellLiteral(marker)} -Value 'orphaned'`,
-      ],
-    );
-    const executable = writePowerShellFixture(
-      temporaryDirectory,
-      "abort.ps1",
-      [
-        "$input | Out-Null",
-        [
-          "Start-Process",
-          `-FilePath ${powerShellLiteral(path.join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))}`,
-          `-ArgumentList @('-NoProfile', '-NonInteractive', '-File', ${powerShellLiteral(childScript)})`,
-          "-WindowStyle Hidden",
-        ].join(" "),
-        "Start-Sleep -Seconds 30",
-        "Write-Output 'late output'",
-      ],
+      "abort",
     );
     const executor = new LocalCodexExecutor(
       executable,
@@ -239,16 +236,13 @@ describe("LocalCodexExecutor process boundary", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 2500));
     expect(fs.existsSync(marker)).toBe(false);
-  });
+  }, 10_000);
 
   it("terminates a worker whose output exceeds the configured bound", async () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "large-output.ps1",
-      [
-        "$input | Out-Null",
-        "Write-Output ('x' * 5000)",
-      ],
+      "large-output",
     );
     const executor = new LocalCodexExecutor(
       executable,
@@ -296,10 +290,10 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   it("rejects an executable that does not match the approved hash", () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "hash-mismatch.ps1",
-      ["Write-Output 'should not run'"],
+      "inspect",
     );
 
     expect(
@@ -317,10 +311,10 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   it("rejects a missing Codex code-mode host", () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "missing-companion.ps1",
-      ["Write-Output 'should not run'"],
+      "inspect",
     );
 
     expect(
@@ -338,10 +332,10 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 
   it("rejects a Codex code-mode host with the wrong approved hash", () => {
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       temporaryDirectory,
-      "companion-hash.ps1",
-      ["Write-Output 'should not run'"],
+      "inspect",
     );
 
     expect(
@@ -361,10 +355,10 @@ describe("LocalCodexExecutor process boundary", () => {
   it("requires the Codex executable and companion to be sibling files", () => {
     const nested = path.join(temporaryDirectory, "nested");
     fs.mkdirSync(nested);
-    const executable = writePowerShellFixture(
+    const executable = writeNativeFixture(
+      fixtureTemplate,
       nested,
-      "sibling-boundary.ps1",
-      ["Write-Output 'should not run'"],
+      "inspect",
     );
 
     expect(
@@ -382,13 +376,18 @@ describe("LocalCodexExecutor process boundary", () => {
   });
 });
 
-function writePowerShellFixture(
+function writeNativeFixture(
+  template: string,
   directory: string,
-  name: string,
-  lines: string[],
+  mode: string,
 ): string {
-  const file = path.join(directory, name);
-  fs.writeFileSync(file, `${lines.join("\r\n")}\r\n`, "utf8");
+  const file = path.join(directory, "codex.exe");
+  fs.copyFileSync(template, file);
+  fs.writeFileSync(
+    path.join(directory, "codex-fixture-mode.txt"),
+    mode,
+    "utf8",
+  );
   return file;
 }
 
@@ -402,6 +401,111 @@ function trustedPath(): string {
   return process.env["PATH"] ?? process.env["Path"] ?? "";
 }
 
-function powerShellLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+function compileNativeFixture(directory: string): string {
+  if (process.platform !== "win32") {
+    throw new Error("The native Codex process fixture requires Windows.");
+  }
+  const source = path.join(directory, "codex-fixture.cs");
+  const output = path.join(directory, "codex-fixture.exe");
+  fs.writeFileSync(
+    source,
+    [
+      "using System;",
+      "using System.Diagnostics;",
+      "using System.IO;",
+      "using System.Text;",
+      "using System.Threading;",
+      "public static class Program {",
+      "  private static string Json(string value) {",
+      "    if (value == null) return \"null\";",
+      "    var result = new StringBuilder(\"\\\"\");",
+      "    foreach (char character in value) {",
+      "      switch (character) {",
+      "        case '\\\\': result.Append(\"\\\\\\\\\"); break;",
+      "        case '\\\"': result.Append(\"\\\\\\\"\"); break;",
+      "        case '\\r': result.Append(\"\\\\r\"); break;",
+      "        case '\\n': result.Append(\"\\\\n\"); break;",
+      "        case '\\t': result.Append(\"\\\\t\"); break;",
+      "        default:",
+      "          if (character < 0x20) result.AppendFormat(\"\\\\u{0:x4}\", (int)character);",
+      "          else result.Append(character);",
+      "          break;",
+      "      }",
+      "    }",
+      "    return result.Append('\\\"').ToString();",
+      "  }",
+      "  private static string JsonArray(string[] values) {",
+      "    var result = new StringBuilder(\"[\");",
+      "    for (int index = 0; index < values.Length; index++) {",
+      "      if (index > 0) result.Append(',');",
+      "      result.Append(Json(values[index]));",
+      "    }",
+      "    return result.Append(']').ToString();",
+      "  }",
+      "  private static string Argument(string[] args, string name) {",
+      "    for (int index = 0; index + 1 < args.Length; index++) {",
+      "      if (args[index] == name) return args[index + 1];",
+      "    }",
+      "    throw new InvalidOperationException(\"Missing fixture argument: \" + name);",
+      "  }",
+      "  public static int Main(string[] args) {",
+      "    if (args.Length > 1 && args[0] == \"--fixture-abort-child\") {",
+      "      Thread.Sleep(2000);",
+      "      File.WriteAllText(args[1], \"orphaned\");",
+      "      return 0;",
+      "    }",
+      "    var mode = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, \"codex-fixture-mode.txt\")).Trim();",
+      "    var prompt = Console.In.ReadToEnd();",
+      "    if (mode == \"hang\") {",
+      "      Thread.Sleep(30000);",
+      "      Console.Write(\"late output\");",
+      "      return 0;",
+      "    }",
+      "    if (mode == \"abort\") {",
+      "      var project = Argument(args, \"--cd\");",
+      "      var marker = Path.Combine(Directory.GetParent(project).FullName, \"orphan-marker.txt\");",
+      "      var child = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, \"codex.exe\");",
+      "      Process.Start(new ProcessStartInfo {",
+      "        FileName = child,",
+      "        Arguments = \"--fixture-abort-child \\\"\" + marker.Replace(\"\\\"\", \"\\\\\\\"\") + \"\\\"\",",
+      "        UseShellExecute = false,",
+      "        CreateNoWindow = true",
+      "      });",
+      "      Thread.Sleep(30000);",
+      "      Console.Write(\"late output\");",
+      "      return 0;",
+      "    }",
+      "    if (mode == \"large-output\") {",
+      "      Console.Write(new string('x', 5000));",
+      "      return 0;",
+      "    }",
+      "    Console.Write(\"{\\\"arguments\\\":\" + JsonArray(args)",
+      "      + \",\\\"prompt\\\":\" + Json(prompt)",
+      "      + \",\\\"codexHome\\\":\" + Json(Environment.GetEnvironmentVariable(\"CODEX_HOME\"))",
+      "      + \",\\\"bridgeNamespace\\\":\" + Json(Environment.GetEnvironmentVariable(\"BALCONY_SERVICEBUS_NAMESPACE\"))",
+      "      + \",\\\"azureSecret\\\":\" + Json(Environment.GetEnvironmentVariable(\"AZURE_CLIENT_SECRET\")) + \"}\");",
+      "    return 0;",
+      "  }",
+      "}",
+    ].join("\r\n"),
+    "utf8",
+  );
+  const compiler = path.join(
+    process.env["WINDIR"] ?? "C:\\Windows",
+    "Microsoft.NET",
+    "Framework64",
+    "v4.0.30319",
+    "csc.exe",
+  );
+  const result = spawnSync(
+    compiler,
+    ["/nologo", "/target:exe", `/out:${output}`, source],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `Unable to build the native Codex fixture: ${result.error?.message ?? result.stderr}`,
+    );
+  }
+  return output;
 }
