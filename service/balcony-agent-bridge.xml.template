@@ -6,6 +6,7 @@
   <arguments>__BRIDGE_ENTRYPOINT__</arguments>
   <workingdirectory>__REPOSITORY_ROOT__</workingdirectory>
   <env name="BALCONY_SYSTEM_ID" value="__SYSTEM_ID__" />
+  <env name="BALCONY_RUNTIME_SUPERVISION" value="service_parent" />
   <env name="BALCONY_AUTHORIZED_NODE_IDS" value="__AUTHORIZED_NODE_IDS__" />
   <env name="BALCONY_BRIDGE_DB_PATH" value="__DATABASE_PATH__" />
   <env name="BALCONY_SERVICEBUS_NAMESPACE" value="__SERVICEBUS_NAMESPACE__" />

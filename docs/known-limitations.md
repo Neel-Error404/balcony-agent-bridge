@@ -38,9 +38,11 @@ the smaller static design.
   the local OS/process identity boundary; signer key IDs are not retained as a
   separate inbox audit field.
 - Current automated clean-consumer proof uses an isolated npm cache on its
-  executing host. Version `0.3.0` remains a release candidate until registry,
-  byte-identity, and two independent clean-VM reruns complete; neither that
-  release nor `0.2.0` is a production-service support promise.
+  executing host. Version `0.3.0` is the public npm-first baseline; `0.3.1-core.1`
+  is an unpublished core candidate, not the broader onboarding candidate.
+  Public publication, byte-identity and two independent clean-machine
+  acceptance remain gates. Neither metadata nor local tests are a
+  production-service support promise.
 - GitHub private vulnerability reporting is enabled. Follow `SECURITY.md` and
   never put sensitive vulnerability details in a public issue.
 - The owner accepted the existing public Git history for `v0.1.0` after a
@@ -50,11 +52,33 @@ the smaller static design.
   scan cannot prove the absence of every unknown secret format.
 - A live signed multi-machine acceptance test has not been performed on this
   candidate; Azure provisioning and operational cutover remain owner-gated.
+- The retained signed peer-check service is an internal diagnostic seam, not
+  a newly exposed CLI onboarding command in this core candidate. Its local
+  tests use file-backed node state and the production signed
+  transport with a simulated SDK broker, not Azure or independent Windows
+  machines. Database/service reopen is not an OS-process crash test.
+- The local hardening candidate uses request expiry as the completion deadline
+  and refuses late answers as continuation authority, but has no caller-facing
+  remote cancellation protocol. Deadline failure does not stop a worker that
+  is already running. The default seven-day message expiry is not a short
+  application SLO; callers should deliberately set a bounded expiry.
+- A consumed approve-once row is an exact-request retry reservation, not an
+  exactly-once execution ledger. Worker work may repeat after a crash before
+  result persistence; matching stored results are reused. Revocation cannot
+  retract an already-enqueued result.
+- The conservative aggregate heartbeat distinguishes failed lanes internally
+  but still labels both cold unproven readiness and observed failure degraded.
+  No complete per-lane diagnostic, alerting path or clean-host ready certificate
+  follows from this local change.
 
 ## Security Residuals
 
 - An authorized peer can send any schema-valid message allowed by the protocol.
   Membership authenticates nodes; it does not make a compromised node benign.
+- Peer-check acknowledgement lookup streams matching candidates without
+  truncating before validation. Memory is bounded, but CPU work grows with
+  candidate count. Per-peer admission/storage quotas remain unimplemented;
+  this is not a denial-of-service-hardening claim.
 - Revocation is a coordinated static policy update and bridge restart, not an
   online revocation service.
 - Exact replay of a still-valid signed message after loss of the receiving
@@ -76,6 +100,27 @@ the smaller static design.
   privileged actor may race or replace trusted runtime inputs.
 
 ## Deferred By Design
+
+The local parent-supervision candidate is service-only and existence-based.
+It prevents a cooperative Node child from continuing after its original parent
+disappears, but cannot identify a reused PID or poll during event-loop
+starvation. The bridge independently bounds lane quiescence. The dispatcher
+bounds process-close waiting: failed or unverified termination stops polling,
+retains the task claim, and leaves a runtime failure gate that blocks restart
+before a healthy heartbeat or execution. This is not proof of child death.
+The gate requires explicitly authorized operator verification of process
+quiescence; never clear it solely because a wrapper stopped or a timer elapsed.
+Real managed Codex initialization cancellation passed without credentials;
+active authenticated descendants and real service interruption remain untested.
+A real service/worker interruption must be tested before deployed supervision
+is certified. No parent/process kill is authorized by a diagnostic message.
+
+Protocol `1.1` no-delegation enforcement is a local candidate. It requires
+compatible receivers; legacy `1.0` requests do not authorize new peer
+delegation after upgrade. Existing legacy waiting-peer runs may terminate
+instead of resuming nested work and require backlog review. The patch does not
+itself recover orphan transport processes, restart dispatchers, verify worker
+login, or provide automatic caller-chat wake-up.
 
 - hosted relay, node directory, automated enrollment, and one-time join codes;
 - web UI, dashboards, fleet policy, and dynamic topology changes;

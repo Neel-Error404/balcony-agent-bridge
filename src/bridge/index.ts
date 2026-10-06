@@ -16,6 +16,8 @@ import { ServiceBusBridgeTransport } from "../transport/service-bus-transport.js
 import { acquireBridgeProcessLock } from "./process-lock.js";
 import { closeTransportWithin, runBridgeLoops } from "./runtime.js";
 import { BridgeWorker } from "./worker.js";
+import { PeerCheckService } from "./peer-check.js";
+import { serviceParentSupervisionEnabled, superviseParent } from "../runtime/parent-supervision.js";
 
 try {
   const invocation = parseBridgeInvocation(process.argv.slice(2));
@@ -25,6 +27,9 @@ try {
       "Internal: node dist/bridge/index.js [--config <absolute-path>] [--validate-message-authentication]\n",
     );
   } else {
+    const parentSupervised = serviceParentSupervisionEnabled(
+      process.env["BALCONY_RUNTIME_SUPERVISION"],
+    );
     const config = invocation.configPath
       ? assertConfigMatchesProcessIdentity(loadConfigFile(invocation.configPath))
       : loadConfig();
@@ -40,16 +45,35 @@ try {
     });
     if (!invocation.validateMessageAuthentication) {
       const processLock = acquireBridgeProcessLock(config.systemId);
+      let ownershipReleaseSafe = true;
       try {
         const database = new BridgeDatabase(config.databasePath);
         const transport = new ServiceBusBridgeTransport(config, authenticator);
-        const worker = new BridgeWorker(config, database, transport);
+        const peerChecks = new PeerCheckService(config, database, authenticator.networkId);
+        const worker = new BridgeWorker(config, database, transport, peerChecks);
         const controller = new AbortController();
         process.once("SIGINT", () => controller.abort());
         process.once("SIGTERM", () => controller.abort());
+        const stopSupervision = superviseParent(controller, {
+          enabled: parentSupervised,
+          onFailure: (code) => {
+            worker.recordHeartbeat("degraded", code);
+            console.error(`Bridge supervision failed (${code})`);
+            process.exitCode = 1;
+          },
+        });
         try {
-          await runBridgeLoops(worker, controller);
+          ownershipReleaseSafe = false;
+          ownershipReleaseSafe = await runBridgeLoops(worker, controller);
         } finally {
+          stopSupervision();
+          controller.abort();
+          if (!ownershipReleaseSafe) {
+            // Live SDK work may still own SQLite/transport state. Exit before
+            // releasing the lock; the next process reclaims it only after death.
+            console.error("Bridge shutdown could not prove lane quiescence");
+            process.exit(1);
+          }
           const transportClosed = await closeTransportWithin(transport, 5000);
           if (transportClosed) {
             database.close();
@@ -58,11 +82,12 @@ try {
               "Bridge transport did not close within the shutdown deadline",
             );
             process.exitCode = 1;
-            setImmediate(() => process.exit(1));
+            ownershipReleaseSafe = false;
+            process.exit(1);
           }
         }
       } finally {
-        processLock.release();
+        if (ownershipReleaseSafe) processLock.release();
       }
     }
   }

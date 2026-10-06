@@ -16,6 +16,32 @@ session receiver use separate Service Bus clients. Idle receiving therefore
 cannot starve queued outbound work. Shutdown is separately bounded because an
 SDK session accept or client close may not honor cancellation promptly.
 
+The hardening candidate keeps separate in-memory sender and receiver outcomes
+before writing the existing aggregate heartbeat. A receiver failure persists
+through sender successes and a caught sender failure persists through empty
+outbox polls. Health starts degraded until an actual send and a completed
+receive cycle establish both lanes; cold idle is unproven rather than proof of
+failure. The shared heartbeat still does not provide a complete per-lane
+diagnostic or peer execution certificate. Timer waits detach abort listeners
+on completion as well as cancellation.
+
+Service templates opt into `BALCONY_RUNTIME_SUPERVISION=service_parent`.
+The bridge and dispatcher monitor their original parent PID and abort if it
+disappears or its presence cannot be verified. Foreground operation leaves
+this mode unset. Parent loss records a safe degraded reason and a nonzero
+exit; later lane failures do not overwrite that diagnosis.
+
+The bridge waits for its active lanes to settle before closing shared state
+and releasing its lock. If quiescence or transport close is not established
+within the shutdown boundary, it exits without an explicit lock release;
+replacement work may reclaim the stale lock only after the process is dead.
+Uncertain sends remain leased for retry. Aborted worker results do not become
+authoritative successes.
+
+This polling checks parent existence, not cryptographic or service identity.
+PID reuse and event-loop starvation remain limits. Synthetic process tests
+are not actual WinSW/Codex or bilateral deployment acceptance.
+
 Exactly one bridge transport worker may run for each machine identity. The
 process acquires a machine-wide worker lock before opening SQLite or Service
 Bus. A second live worker fails closed, while a lock left by a process that no
@@ -56,6 +82,19 @@ read-only access declaration, a stable project key, and ordinary task content.
 A result identifies the original request through both `causation_id` and
 `coordination_result.request_message_id`. Envelope validation rejects a
 mismatch before persistence.
+
+The local candidate's coordination protocol `1.1` carries explicit delegation
+authority. New callers default to none; bounded peer consultation requires a
+positive maximum depth and remains limited by local policy and inherited
+context. The effective policy is durable and cannot be widened by continuation
+or run updates. Missing legacy policy grants no new delegation; legacy waiting
+peer work must be explicitly accounted for during upgrade.
+
+The child prompt omits peer-request forms when forbidden, but the coordinator
+also rejects such output before parking/enqueue and after recovery. This is a
+machine-enforced boundary, not natural-language intent detection. Results must
+match their request protocol, including nested results. Old receivers reject
+`1.1`, so paired version acceptance precedes production use.
 
 The durable transaction is:
 
@@ -148,6 +187,19 @@ after another consumer reclaims the task. Codex inspection itself remains
 at-least-once because a crash before settlement may cause the read-only work to
 run again.
 
+Approve-once consumption creates an exact-request retry reservation in the
+same SQLite transaction. Its original authenticated message can recover before
+expiry; a different-message replay cannot borrow it. A matching authoritative
+result is reused in its original form without another executor launch.
+Revocation and disabled resources remain authorization gates, including late
+consultation settlement. A completed run is not disclosure permission.
+
+The request expiry instant is also the caller's completion deadline. A timely
+durably received reply remains authoritative on later reads. A reply arriving
+at or after expiry cannot turn failure into success or authorize continuation;
+an alternative reply cannot replace the selected authoritative result.
+`TASK_DEADLINE_EXCEEDED` is local result status, not remote cancellation.
+
 An existing pending, leased, or sent deterministic result is authoritative
 after crash recovery. A quarantined or expired prior result is not reused as a
 successful reply; the dispatcher rejects the request through a separate
@@ -157,6 +209,20 @@ The dispatcher renews its local claim while Codex runs. Claim-renewal failure
 or process shutdown cancels the child process tree and leaves the request
 recoverable after lease expiry. Windows cancellation is not reported complete
 until `taskkill /T /F` succeeds and the launched process closes.
+
+The termination helper has a two-second bound; after that attempt the executor
+allows five seconds for process close. Without close it rejects with
+`CODEX_TERMINATION_FAILED`, not a successful cancellation. A process error
+after termination begins has the same fail-closed classification. This failure
+takes precedence over claim-renewal errors and is not settled as a task result.
+
+The foreground dispatcher stops polling, records the failure in existing
+SQLite runtime state, and exits. Startup checks both dispatcher and consultation
+failure state before supervision callbacks or a healthy heartbeat can erase it.
+Service restart does not grant authority to resume over an unverified surviving
+executor. A trusted operator must verify quiescence before explicitly clearing
+that failure under a reviewed recovery operation. This gate is not a tamper-
+proof latch against local administrators, nor proof that the process is dead.
 
 ## Azure Topology
 

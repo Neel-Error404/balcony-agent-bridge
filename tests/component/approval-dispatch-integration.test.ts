@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AgentBridgeService } from "../../src/application/agent-bridge-service.js";
 import type { BridgeConfig, ReadOnlyDispatcherConfig } from "../../src/config.js";
 import { createEnvelope, type BridgeEnvelope } from "../../src/contracts/envelope.js";
 import type {
@@ -74,6 +75,182 @@ describe.each(["dispatcher", "coordinator"] as const)(
         fixture.database.getAuthorizationRequest(request.message_id, at(3)),
       ).toMatchObject({ state: "consumed" });
     });
+
+    if (kind === "dispatcher") it("reuses a persisted authoritative reply without starting the worker again", async () => {
+      const fixture = createFixture(kind, roots, databases);
+      const request = requestFor(kind);
+      fixture.database.persistIncoming(request, 1, at(0), true);
+      await fixture.run(at(1));
+      fixture.database.approveAuthorizationRequestOnce({
+        requestId: request.message_id,
+        actorId: "SYS-B",
+        now: at(2),
+      });
+      const service = new AgentBridgeService(bridgeConfig(), fixture.database);
+      service.reply(
+        request.message_id,
+        `read-only-result:${request.message_id}`,
+        "task_result",
+        {
+          subject: "Read-only task completed: Inspect resource",
+          body: "Original authoritative answer.",
+          project: resourceId,
+          evidence: [],
+        },
+      );
+
+      await fixture.run(at(3));
+      expect(fixture.executor.inputs).toHaveLength(0);
+      expect(fixture.database.getInboxMessage(request.message_id)?.state).toBe("processed");
+      expect(fixture.database.getStatus().outbox.pending).toBe(1);
+      expect(fixture.database.getOutboxByIdempotency(
+        "SYS-A",
+        `read-only-result:${request.message_id}`,
+      )?.envelope.payload.body).toBe("Original authoritative answer.");
+    });
+
+    if (kind === "dispatcher") it("settles a persisted rejected reply without rerunning the worker or reconstructing its payload", async () => {
+      const fixture = createFixture(kind, roots, databases);
+      const request = requestFor(kind);
+      fixture.database.persistIncoming(request, 1, at(0), true);
+      await fixture.run(at(1));
+      fixture.database.approveAuthorizationRequestOnce({
+        requestId: request.message_id,
+        actorId: "SYS-B",
+        now: at(2),
+      });
+      const storedPayload = {
+        subject: "Original rejected subject",
+        body: "Original authoritative rejection.",
+        evidence: [{ kind: "git_commit" as const, value: "a".repeat(40) }],
+      };
+      new AgentBridgeService(bridgeConfig(), fixture.database).reply(
+        request.message_id,
+        `read-only-result:${request.message_id}`,
+        "task_result",
+        storedPayload,
+      );
+      const stored = fixture.database.getOutboxByIdempotency(
+        "SYS-A",
+        `read-only-result:${request.message_id}`,
+      )!.envelope;
+      const settlement = vi.spyOn(fixture.database, "settleInboxWithReply");
+
+      await fixture.run(at(3));
+      expect(fixture.executor.inputs).toHaveLength(0);
+      expect(fixture.database.getInboxMessage(request.message_id)?.state).toBe("rejected");
+      expect(fixture.database.getStatus().outbox.pending).toBe(1);
+      expect(settlement).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: "rejected",
+        replyEnvelope: stored,
+      }));
+      expect(fixture.database.getOutboxByIdempotency(
+        "SYS-A",
+        `read-only-result:${request.message_id}`,
+      )?.envelope.payload).toMatchObject(storedPayload);
+    });
+
+    if (kind === "dispatcher") it("does not start an executor when expiry passes after authorization but before execution", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const base = new Date();
+        const fixture = createFixture(kind, roots, databases);
+        const request = requestFor(
+          kind,
+          resourceId,
+          new Date(base.getTime() + 5_000).toISOString(),
+        );
+        fixture.database.persistIncoming(request, 1, base, true);
+        await fixture.run(new Date(base.getTime() + 1_000));
+        fixture.database.approveAuthorizationRequestOnce({
+          requestId: request.message_id,
+          actorId: "SYS-B",
+          now: new Date(base.getTime() + 2_000),
+        });
+        vi.setSystemTime(new Date(base.getTime() + 3_000));
+        const authorize = fixture.database.authorizeClaimedResourceAccess.bind(fixture.database);
+        vi.spyOn(fixture.database, "authorizeClaimedResourceAccess").mockImplementation((input) => {
+          const decision = authorize(input);
+          vi.setSystemTime(new Date(base.getTime() + 6_000));
+          return decision;
+        });
+
+        await fixture.run(new Date(base.getTime() + 3_000));
+        expect(fixture.executor.inputs).toHaveLength(0);
+        expect(fixture.database.getInboxMessage(request.message_id)?.state).toBe("rejected");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    if (kind === "coordinator") it("settles a completed consultation after an expired lease and deadline without restarting its child", async () => {
+      const fixture = createFixture(kind, roots, databases);
+      const request = requestFor(kind, resourceId, at(850).toISOString());
+      fixture.database.persistIncoming(request, 1, at(0), true);
+      await fixture.run(at(1));
+      fixture.database.approveAuthorizationRequestOnce({
+        requestId: request.message_id,
+        actorId: "SYS-B",
+        now: at(2),
+      });
+      vi.spyOn(fixture.database, "settleInboxWithReply").mockImplementationOnce(() => {
+        throw new Error("simulated crash after completed run");
+      });
+      await expect(fixture.run(at(3))).rejects.toThrow("simulated crash");
+      expect(fixture.database.getConsultationRun(request.message_id)?.state).toBe("completed");
+      expect(fixture.executor.inputs).toHaveLength(1);
+
+      await fixture.run(at(950));
+      expect(fixture.executor.inputs).toHaveLength(1);
+      expect(fixture.database.getConsultationRun(request.message_id)?.state).toBe("completed");
+      expect(fixture.database.getInboxMessage(request.message_id)?.state).toBe("processed");
+    });
+
+    if (kind === "coordinator") it.each([
+      "persistent grant revoked",
+      "temporary approval revoked",
+      "temporary approval expired",
+    ] as const)(
+      "does not release a completed consultation after request expiry when its %s",
+      async (authority) => {
+        const fixture = createFixture(kind, roots, databases);
+        const request = requestFor(kind, resourceId, at(850).toISOString());
+        fixture.database.persistIncoming(request, 1, at(0), true);
+        if (authority === "persistent grant revoked") {
+          fixture.database.grantPeerResource("SYS-A", resourceId, at(0));
+        } else {
+          await fixture.run(at(1));
+          fixture.database.approveAuthorizationRequestTemporary({
+            requestId: request.message_id,
+            actorId: "SYS-B",
+            expiresAtUtc: at(authority === "temporary approval expired" ? 500 : 1000).toISOString(),
+            now: at(2),
+          });
+        }
+        vi.spyOn(fixture.database, "settleInboxWithReply").mockImplementationOnce(() => {
+          throw new Error("simulated crash before terminal settlement");
+        });
+        await expect(fixture.run(at(3))).rejects.toThrow("simulated crash");
+        expect(fixture.database.getConsultationRun(request.message_id)?.state).toBe("completed");
+        if (authority === "persistent grant revoked") {
+          fixture.database.revokePeerResource("SYS-A", resourceId, at(10), "SYS-B");
+        } else if (authority === "temporary approval revoked") {
+          fixture.database.revokeAuthorizationRequest({
+            requestId: request.message_id,
+            actorId: "SYS-B",
+            now: at(10),
+          });
+        }
+
+        await fixture.run(at(950));
+        expect(fixture.executor.inputs).toHaveLength(1);
+        expect(fixture.database.getOutboxByIdempotency(
+          "SYS-A",
+          `consultation-result:${request.message_id}`,
+        )).toBeUndefined();
+        expect(fixture.database.getInboxMessage(request.message_id)?.state).toBe("rejected");
+      },
+    );
 
     it.each([
       ["unknown resource", "unlisted-project", true, "enabled"],
@@ -167,6 +344,7 @@ function createFixture(
 function requestFor(
   kind: "dispatcher" | "coordinator",
   project = resourceId,
+  expiresAtUtc?: string,
 ): BridgeEnvelope {
   return createEnvelope({
     idempotencyKey: `${kind}-${project}`,
@@ -176,6 +354,7 @@ function requestFor(
     streamId: kind === "dispatcher" ? "approval-dispatch" : "agent-coordination",
     conversationId: "f1111111-1111-4111-8111-111111111111",
     sequenceNumber: 0,
+    ...(expiresAtUtc ? { expiresAtUtc } : {}),
     payload: {
       project,
       subject: "Inspect resource",

@@ -125,7 +125,7 @@ describe("read-only dispatch round trip", () => {
         project: "voiceai",
         body: "VoiceAI is present, clean, and its approved tests pass.",
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },

@@ -102,7 +102,7 @@ describe("coordination security boundary", () => {
         project: "voiceai",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: ask.task_id,
           outcome: "completed",
         },
@@ -132,7 +132,7 @@ describe("coordination security boundary", () => {
         project: "voiceai",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: ask.task_id,
           outcome: "completed",
         },
@@ -182,7 +182,7 @@ describe("coordination security boundary", () => {
         project: "trading",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: ask.task_id,
           outcome: "completed",
         },

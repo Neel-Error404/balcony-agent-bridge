@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodError, z } from "zod";
 
 import { AgentBridgeService } from "../application/agent-bridge-service.js";
-import { CoordinationIntentSchema } from "../contracts/coordination.js";
+import { CoordinationIntentSchema, DelegationPolicySchema } from "../contracts/coordination.js";
 import {
   MESSAGE_KINDS,
   MessageKindSchema,
@@ -22,7 +22,7 @@ const MessageKindArraySchema = z.array(MessageKindSchema).max(
 export function createMcpServer(service: AgentBridgeService): McpServer {
   const server = new McpServer({
     name: "balcony-agent-bridge-mcp-server",
-    version: "0.3.0",
+    version: "0.3.1-core.1",
   });
 
   server.registerTool(
@@ -92,6 +92,7 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
         intent: CoordinationIntentSchema.default("question"),
         timeout_seconds: z.number().int().min(30).max(600).default(300),
         evidence_mode: z.literal("pinned_git").optional(),
+        delegation: DelegationPolicySchema.default({ mode: "none" }),
         conversation_id: z.string().uuid().optional(),
         expires_at_utc: z.string().datetime({ offset: true }).optional(),
       },
@@ -112,6 +113,7 @@ export function createMcpServer(service: AgentBridgeService): McpServer {
           request: input.request,
           intent: input.intent,
           timeoutSeconds: input.timeout_seconds,
+          delegation: input.delegation,
           ...(input.evidence_mode
             ? { evidenceMode: input.evidence_mode }
             : {}),

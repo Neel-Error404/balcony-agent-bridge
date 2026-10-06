@@ -110,6 +110,27 @@ credentials; queued work stays local while the bridge service is unavailable.
 
 ## Upgrade Boundary
 
+The local candidate templates enable `BALCONY_RUNTIME_SUPERVISION=service_parent`.
+This option must be deployed only through the reviewed service procedure, not
+by editing live XML during diagnosis. Foreground clients leave it unset.
+Before restart, verify service wrapper, child and lock ownership; do not
+start a second worker while an orphaned lock owner is still alive.
+
+After approved deployment, test wrapper loss on disposable/controlled
+operation, nonzero child shutdown and truthful degraded heartbeat, bounded
+transport quiescence, retained uncertain-send lease, stale-lock recovery only
+after process death, and absence of authoritative interrupted answers. A
+template change or synthetic test alone does not prove installed behavior.
+
+If `CODEX_TERMINATION_FAILED` is retained in dispatcher or consultation runtime
+state, do not repeatedly restart or mark the component healthy. The candidate
+blocks startup before claiming work. First use bounded approved operator
+control to identify the exact launched process tree and prove every worker is
+gone; account for in-flight claims and potential effects. Only then approve an
+explicit recovery operation to clear the retained failure. A stopped wrapper,
+elapsed deadline or successful database restore is not process-death proof.
+No automatic clear or process-kill authority is supplied by diagnostics.
+
 v0.1 has no supported in-place bridge-service updater or downgrade. Do not
 rerun the initial installer over an existing registered service: it is a
 fresh-install path, not a transactional update path. A package-only

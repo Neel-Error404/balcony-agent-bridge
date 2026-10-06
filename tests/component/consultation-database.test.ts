@@ -77,6 +77,17 @@ describe("durable consultation runs", () => {
     });
   });
 
+  it("fences delegation authority against duplicate initialization or later widening", () => {
+    const database = openDatabase(":memory:");
+    const original = database.ensureConsultationRun(initialRun()).run;
+    expect(() => database.ensureConsultationRun({
+      ...original, delegation: { mode: "bounded", max_depth: 1 },
+    })).toThrow(/different identity/);
+    expect(() => database.saveConsultationRun({
+      ...original, delegation: { mode: "bounded", max_depth: 1 },
+    }, original.version)).toThrow(/identity|delegation/);
+  });
+
   it("rejects stale writers with optimistic version fencing", () => {
     const database = openDatabase(":memory:");
     const created = database.ensureConsultationRun(initialRun()).run;
@@ -217,6 +228,7 @@ function initialRun(): ConsultationRun {
     root_request_id: "11111111-1111-4111-8111-111111111111",
     project: "balcony-agent-bridge",
     state: "pending_child",
+    delegation: { mode: "none" },
     round_count: 0,
     depth: 0,
     max_rounds: 4,

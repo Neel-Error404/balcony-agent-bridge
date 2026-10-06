@@ -93,6 +93,7 @@ describe("autonomous consultation round trip", () => {
       subject: "Reconcile both bridge runtimes",
       request: "Ask the peer for its runtime state and return one answer.",
       intent: "review",
+      delegation: { mode: "bounded", max_depth: 1 },
       timeoutSeconds: 120,
       evidenceMode: "pinned_git",
       expiresAtUtc: at(base, 120).toISOString(),
@@ -128,10 +129,15 @@ describe("autonomous consultation round trip", () => {
       correlation_id: request.task_id,
       payload: {
         project: "balcony-agent-bridge",
+        coordination_request: {
+          protocol_version: "1.1",
+          delegation: { mode: "bounded", max_depth: 1 },
+        },
         consultation_context: {
           root_request_id: request.task_id,
           parent_request_id: request.task_id,
           depth: 1,
+          max_depth: 1,
         },
       },
     });
@@ -146,6 +152,9 @@ describe("autonomous consultation round trip", () => {
       correlation_id: request.task_id,
       payload: {
         body: "SYS-A reports its canonical bridge runtime is healthy.",
+        coordination_result: {
+          protocol_version: "1.1",
+        },
       },
     });
     await deliver(nestedResult, sysBTransport, sysBWorker);
@@ -171,6 +180,7 @@ describe("autonomous consultation round trip", () => {
           },
         ],
         coordination_result: {
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },

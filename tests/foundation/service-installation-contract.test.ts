@@ -39,6 +39,14 @@ const securityModule = fs.readFileSync(
 );
 
 describe("Windows service installation contract", () => {
+  it("opts both service runtimes into parent supervision", () => {
+    for (const template of [serviceTemplate, dispatcherTemplate]) {
+      expect(template).toContain(
+        '<env name="BALCONY_RUNTIME_SUPERVISION" value="service_parent" />',
+      );
+    }
+  });
+
   it("supports explicit managed-identity and certificate modes", () => {
     expect(installer).toContain(
       'ParameterSetName = "ManagedIdentity"',

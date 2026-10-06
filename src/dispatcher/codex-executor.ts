@@ -199,6 +199,10 @@ export class LocalCodexExecutor implements CodexExecutor {
         terminationWatchdog = setTimeout(() => {
           if (!settled) {
             child.kill("SIGKILL");
+            finish(() => reject(new CodexExecutionError(
+              "CODEX_TERMINATION_FAILED",
+              "The Codex process did not close within its termination deadline; worker quiescence is unverified.",
+            )));
           }
         }, 5000);
       };
@@ -253,8 +257,10 @@ export class LocalCodexExecutor implements CodexExecutor {
         finish(() =>
           reject(
             new CodexExecutionError(
-              "CODEX_LAUNCH_FAILED",
-              "The dispatcher could not start the Codex CLI process.",
+              termination ? "CODEX_TERMINATION_FAILED" : "CODEX_LAUNCH_FAILED",
+              termination
+                ? "The Codex process reported a termination error without verified closure."
+                : "The dispatcher could not start the Codex CLI process.",
               { cause: error },
             ),
           ),
@@ -447,6 +453,8 @@ function terminateProcessTree(
       {
         windowsHide: true,
         stdio: "ignore",
+        timeout: 2000,
+        killSignal: "SIGKILL",
       },
     );
     if (result.status === 0) {

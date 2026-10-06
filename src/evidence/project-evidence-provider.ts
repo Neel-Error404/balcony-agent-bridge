@@ -14,6 +14,10 @@ import {
   type EvidenceBundle,
   type EvidenceItem,
 } from "../contracts/evidence.js";
+import {
+  DelegationPolicySchema,
+  type DelegationPolicy,
+} from "../contracts/coordination.js";
 import { BridgeError } from "../errors.js";
 import {
   SecretPolicyError,
@@ -83,6 +87,7 @@ const ChildPromptInputSchema = z
     request: z.string().trim().min(1).max(12_000),
     priorDiscussion: z.string().max(8000),
     evidence: EvidenceBundleSchema,
+    delegation: DelegationPolicySchema.default({ mode: "none" }),
   })
   .strict();
 
@@ -106,6 +111,7 @@ export interface EvidenceOnlyChildPromptInput {
   request: string;
   priorDiscussion: string;
   evidence: EvidenceBundle;
+  delegation?: DelegationPolicy;
 }
 
 export class EvidencePolicyError extends BridgeError {
@@ -268,9 +274,16 @@ export function buildEvidenceOnlyChildPrompt(
     "Return exactly one JSON object matching one of these forms:",
     '{"schema_version":"1.0","outcome":"completed","answer":"...","evidence_paths":["relative/path"]}',
     '{"schema_version":"1.0","outcome":"needs_information","reason":"...","requested_evidence":["relative/path"],"evidence_paths":[]}',
-    '{"schema_version":"1.0","outcome":"needs_information","reason":"...","peer_request":{"subject":"...","request":"...","intent":"inspect"},"evidence_paths":[]}',
+    ...(parsed.delegation.mode === "bounded"
+      ? [
+          '{"schema_version":"1.0","outcome":"needs_information","reason":"...","peer_request":{"subject":"...","request":"...","intent":"inspect"},"evidence_paths":[]}',
+          `A peer request is permitted only within the explicit bounded delegation limit of depth ${parsed.delegation.max_depth}.`,
+        ]
+      : [
+          "Delegation is prohibited for this request. Do not request peer information; use local evidence needs or a completed answer only.",
+        ]),
     "Use needs_information when the supplied evidence cannot support a current, bounded answer.",
-    "Request exactly one information source per needs_information result: local evidence paths or one peer request.",
+    "Request exactly one permitted information source per needs_information result.",
     "",
     `Request subject: ${parsed.subject}`,
     "Request:",

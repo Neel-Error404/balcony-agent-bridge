@@ -8,6 +8,7 @@ import type {
   InboundDelivery,
 } from "../transport/transport.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
+import type { PeerCheckService } from "./peer-check.js";
 
 const PERMANENT_TRANSPORT_CODES = new Set([
   "UnauthorizedAccess",
@@ -17,23 +18,52 @@ const PERMANENT_TRANSPORT_CODES = new Set([
 
 export class BridgeWorker {
   public readonly instanceId = randomUUID();
+  private outboundCycleOutcome:
+    | { kind: "idle" }
+    | { kind: "sent" }
+    | { kind: "failed"; errorCode: string } = { kind: "idle" };
 
   public constructor(
     private readonly config: BridgeConfig,
     private readonly database: BridgeDatabase,
     private readonly transport: BridgeTransport,
+    private readonly peerChecks?: PeerCheckService,
   ) {}
 
-  public async runOutboundOnce(now = new Date()): Promise<number> {
+  public getOutboundCycleOutcome():
+    | { kind: "idle" }
+    | { kind: "sent" }
+    | { kind: "failed"; errorCode: string } {
+    return this.outboundCycleOutcome;
+  }
+
+  public async runOutboundOnce(
+    now = new Date(),
+    abortSignal?: AbortSignal,
+  ): Promise<number> {
+    this.outboundCycleOutcome = { kind: "idle" };
+    if (abortSignal?.aborted) {
+      return 0;
+    }
+    this.peerChecks?.respondPending(now);
+    if (abortSignal?.aborted) {
+      return 0;
+    }
     const leased = this.database.leaseOutbox(
       this.instanceId,
       10,
       60,
       now,
     );
+    let sent = false;
+    let failureCode: string | undefined;
     for (const item of leased) {
+      if (abortSignal?.aborted) {
+        break;
+      }
       const startedAtUtc = new Date().toISOString();
       if (!this.config.authorizedNodeIds.includes(item.envelope.target_system)) {
+        failureCode ??= "UnauthorizedTargetNode";
         this.database.quarantineOutbox(
           item.envelope.message_id,
           this.instanceId,
@@ -52,6 +82,9 @@ export class BridgeWorker {
       }
       try {
         await this.transport.send(item.envelope);
+        if (abortSignal?.aborted) {
+          break;
+        }
         const finishedAtUtc = new Date().toISOString();
         this.database.markOutboxSent(
           item.envelope.message_id,
@@ -66,8 +99,13 @@ export class BridgeWorker {
           finishedAtUtc,
           outcome: "sent",
         });
+        sent = true;
       } catch (error) {
+        if (abortSignal?.aborted) {
+          break;
+        }
         const code = safeErrorCode(error);
+        failureCode ??= code;
         const finishedAtUtc = new Date().toISOString();
         if (PERMANENT_TRANSPORT_CODES.has(code)) {
           this.database.quarantineOutbox(
@@ -98,14 +136,22 @@ export class BridgeWorker {
         });
       }
     }
+    this.outboundCycleOutcome = failureCode
+      ? { kind: "failed", errorCode: failureCode }
+      : sent
+        ? { kind: "sent" }
+        : { kind: "idle" };
     return leased.length;
   }
 
   public async runInboundOnce(
     abortSignal?: AbortSignal,
   ): Promise<number> {
+    if (abortSignal?.aborted) {
+      return 0;
+    }
     return this.transport.receiveAvailable(
-      async (delivery) => this.processInboundDelivery(delivery),
+      async (delivery) => this.processInboundDelivery(delivery, abortSignal),
       {
         maximumMessages: 10,
         maximumWaitTimeMs: 5000,
@@ -127,21 +173,31 @@ export class BridgeWorker {
 
   private async processInboundDelivery(
     delivery: InboundDelivery,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
+    if (abortSignal?.aborted) {
+      return;
+    }
     const startedAtUtc = new Date().toISOString();
     let envelope;
     try {
       envelope = parseEnvelope(delivery.body);
     } catch {
-      await this.deadLetterInvalidEnvelope(delivery, startedAtUtc);
+      await this.deadLetterInvalidEnvelope(delivery, startedAtUtc, abortSignal);
       return;
     }
 
+    if (abortSignal?.aborted) {
+      return;
+    }
     if (envelope.target_system !== this.config.systemId) {
       await delivery.deadLetter(
         "WrongTargetSystem",
         "Message target does not match this bridge",
       );
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -156,6 +212,9 @@ export class BridgeWorker {
         "UnauthorizedOriginNode",
         "Message origin is not authorized by this bridge",
       );
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -173,6 +232,9 @@ export class BridgeWorker {
         "SessionMismatch",
         "Broker session does not match conversation identifier",
       );
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -192,12 +254,18 @@ export class BridgeWorker {
         true,
       );
     } catch (error) {
+      if (abortSignal?.aborted) {
+        return;
+      }
       try {
         await delivery.abandon();
       } catch (settlementError) {
         console.error(
           `Inbound abandon failed (${safeErrorCode(settlementError)})`,
         );
+      }
+      if (abortSignal?.aborted) {
+        return;
       }
       this.recordInboundAttempt(
         delivery,
@@ -209,11 +277,17 @@ export class BridgeWorker {
       return;
     }
 
+    if (abortSignal?.aborted) {
+      return;
+    }
     if (persisted.status === "collision") {
       await delivery.deadLetter(
         "MessageIdentityCollision",
         "A different payload already uses this message identifier",
       );
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -226,6 +300,9 @@ export class BridgeWorker {
 
     try {
       await delivery.complete();
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -233,6 +310,9 @@ export class BridgeWorker {
         persisted.status,
       );
     } catch (error) {
+      if (abortSignal?.aborted) {
+        return;
+      }
       this.recordInboundAttempt(
         delivery,
         envelope.message_id,
@@ -249,7 +329,11 @@ export class BridgeWorker {
   private async deadLetterInvalidEnvelope(
     delivery: InboundDelivery,
     startedAtUtc: string,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
+    if (abortSignal?.aborted) {
+      return;
+    }
     try {
       await delivery.deadLetter(
         "EnvelopeValidationFailed",
@@ -259,6 +343,9 @@ export class BridgeWorker {
       console.error(
         `Invalid-envelope settlement failed (${safeErrorCode(settlementError)})`,
       );
+    }
+    if (abortSignal?.aborted) {
+      return;
     }
     this.recordInboundAttempt(
       delivery,

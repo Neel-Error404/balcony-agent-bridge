@@ -127,6 +127,85 @@ describe("BridgeDatabase", () => {
     expect(database.getStatus().inbox.quarantined).toBe(1);
   });
 
+  it.each([
+    "2026-10-05T09:00:00+05:30",
+    "2026-10-04T20:30:00-07:00",
+    "2026-10-05T04:00:00.000Z",
+  ])("does not claim an expired offset-bearing envelope (%s)", (expiresAtUtc) => {
+    const receivedAt = new Date("2026-10-05T03:10:00.000Z");
+    const message = createEnvelope({
+      idempotencyKey: `offset-expiry:${expiresAtUtc}`,
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_request",
+      streamId: "database-tests",
+      payload: { subject: "Offset expiry", body: "Synthetic fixture", evidence: [] },
+      now: new Date("2026-10-05T03:00:00.000Z"),
+      expiresAtUtc,
+    });
+    database.persistIncoming(message, 1, receivedAt, true);
+
+    expect(
+      database.claimInbox(
+        "consumer",
+        1,
+        30,
+        undefined,
+        new Date("2026-10-05T04:00:00.000Z"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("claims a future offset instant even when its local calendar date sorts earlier", () => {
+    const receivedAt = new Date("2026-10-05T03:10:00.000Z");
+    const message = createEnvelope({
+      idempotencyKey: "future-offset-expiry",
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_request",
+      streamId: "database-tests",
+      payload: { subject: "Future expiry", body: "Synthetic fixture", evidence: [] },
+      now: new Date("2026-10-05T03:00:00.000Z"),
+      expiresAtUtc: "2026-10-04T23:30:00-05:00",
+    });
+    database.persistIncoming(message, 1, receivedAt, true);
+
+    expect(
+      database.claimInbox(
+        "consumer",
+        1,
+        30,
+        undefined,
+        new Date("2026-10-05T04:00:00.000Z"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ["2026-10-05T09:00:00+05:30", 0],
+    ["2026-10-04T23:30:00-05:00", 1],
+    ["2026-10-05T04:00:00.000Z", 0],
+  ])("leases outbox using the actual expiry instant (%s)", (expiresAtUtc, count) => {
+    const message = createEnvelope({
+      idempotencyKey: `outbox-offset:${expiresAtUtc}`,
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_request",
+      streamId: "database-tests",
+      payload: { subject: "Outbox expiry", body: "Synthetic fixture", evidence: [] },
+      now: new Date("2026-10-05T03:00:00.000Z"),
+      expiresAtUtc,
+    });
+    database.enqueueEnvelope(message);
+
+    expect(
+      database.leaseOutbox("sender", 1, 30, new Date("2026-10-05T04:00:00.000Z")),
+    ).toHaveLength(count);
+    expect(database.getOutboxMessage(message.message_id)?.state).toBe(
+      count === 0 ? "expired" : "leased",
+    );
+  });
+
   it("rejects a cross-origin collision without quarantining the authenticated original", () => {
     const original = envelope("cross-origin-collision", "Expected");
     expect(database.persistIncoming(original, 1, new Date(), true).status).toBe(
@@ -297,6 +376,25 @@ describe("BridgeDatabase", () => {
     expect(
       consultationClaims.map((item) => item.envelope.message_id),
     ).toEqual([consultation.message_id]);
+  });
+
+  it("admits authenticated 1.1 no-delegation requests to the coordinator", () => {
+    const request = createEnvelope({
+      idempotencyKey: "coordinator-1.1",
+      originSystem: "SYS-A", targetSystem: "SYS-B",
+      kind: "task_request", streamId: "agent-coordination",
+      payload: {
+        subject: "Local only", body: "Inspect", project: "voiceai", evidence: [],
+        dispatch: { executor: "codex_cli", access: "read_only", evidence_mode: "pinned_git" },
+        coordination_request: {
+          protocol_version: "1.1", intent: "inspect", access_mode: "read_only",
+          delegation: { mode: "none" },
+        },
+      },
+    });
+    database.persistIncoming(request, 1, new Date(), true);
+    expect(database.claimAutonomousConsultationInbox("coordinator", 1, 720))
+      .toHaveLength(1);
   });
 
   it("does not claim legacy requests older than the activation cutoff", () => {

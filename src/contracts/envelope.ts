@@ -194,6 +194,19 @@ export const BridgeEnvelopeSchema = EnvelopeCoreSchema.superRefine(
 
     if (value.payload.consultation_context) {
       const consultation = value.payload.consultation_context;
+      const request = value.payload.coordination_request;
+      if (request?.protocol_version === "1.1") {
+        const maxDepth = request.delegation.mode === "none"
+          ? 0
+          : request.delegation.max_depth;
+        if (consultation.max_depth > maxDepth) {
+          context.addIssue({
+            code: "custom",
+            message: "Consultation context exceeds explicit delegation authority.",
+            path: ["payload", "consultation_context", "max_depth"],
+          });
+        }
+      }
       if (!value.payload.coordination_request) {
         context.addIssue({
           code: "custom",
@@ -254,6 +267,29 @@ export const BridgeEnvelopeSchema = EnvelopeCoreSchema.superRefine(
           message:
             "agent-coordination stream accepts only task_request or task_result",
           path: ["kind"],
+        });
+      }
+    }
+
+    if (value.stream_id === "agent-peer-check") {
+      if (value.kind !== "heartbeat" && value.kind !== "acknowledgement") {
+        context.addIssue({
+          code: "custom",
+          message: "agent-peer-check stream accepts only heartbeat or acknowledgement",
+          path: ["kind"],
+        });
+      }
+      if (
+        value.payload.task_reference ||
+        value.payload.dispatch ||
+        value.payload.coordination_request ||
+        value.payload.coordination_result ||
+        value.payload.consultation_context
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "agent-peer-check stream cannot carry task or dispatch fields",
+          path: ["payload"],
         });
       }
     }

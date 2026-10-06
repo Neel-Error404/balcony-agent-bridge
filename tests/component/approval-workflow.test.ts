@@ -166,7 +166,7 @@ describe("BridgeDatabase approval workflow", () => {
     expect(approvals(database).listAuthorizationRequests()).toEqual([]);
   });
 
-  it("consumes approve-once atomically and rejects every later ordinary-dispatch retry", () => {
+  it("consumes approve-once atomically and recovers only its exact original request", () => {
     const database = openDatabase(":memory:");
     database.registerResource("voiceai", start);
     const original = claimRequest(database, request("approve-once"));
@@ -209,7 +209,8 @@ describe("BridgeDatabase approval workflow", () => {
         accessInput(recoveryClaim, new Date("2026-08-27T12:00:03.000Z")),
       ),
     ).toEqual({
-      status: "denied",
+      status: "authorized",
+      basis: "same_request_recovery",
       approvalRequestId: original.envelope.message_id,
     });
 

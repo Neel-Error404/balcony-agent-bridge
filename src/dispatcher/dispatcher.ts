@@ -9,6 +9,7 @@ import {
   CodexExecutionError,
   DispatchResultUnavailableError,
   DispatchRejectedError,
+  StateTransitionError,
 } from "../errors.js";
 import { safeErrorCode } from "../security/sanitize-error.js";
 import type {
@@ -70,6 +71,7 @@ export class ReadOnlyDispatcher {
     now = new Date(),
     abortSignal?: AbortSignal,
   ): Promise<number> {
+    if (abortSignal?.aborted) return 0;
     const claims = this.database.claimReadOnlyDispatchInbox(
       this.consumerId,
       1,
@@ -125,6 +127,66 @@ export class ReadOnlyDispatcher {
         );
       }
 
+      const priorResult = this.database.getOutboxByIdempotency(
+        claim.envelope.origin_system,
+        `read-only-result:${claim.envelope.message_id}`,
+      );
+      if (priorResult) {
+        const reply = priorResult.envelope;
+        if (
+          reply.kind !== "task_result" ||
+          reply.origin_system !== this.config.systemId ||
+          reply.target_system !== claim.envelope.origin_system ||
+          reply.conversation_id !== claim.envelope.conversation_id ||
+          reply.causation_id !== claim.envelope.message_id ||
+          (reply.payload.project !== undefined &&
+            reply.payload.project !== task.project)
+        ) {
+          throw new StateTransitionError(
+            "The persisted deterministic result does not match the claimed read-only request.",
+          );
+        }
+        // Dispatcher success replies include the project; its rejection
+        // replies intentionally omit it. Preserve the stored envelope rather
+        // than rebuilding a success-shaped result during recovery.
+        const outcome = reply.payload.project === task.project
+          ? "processed"
+          : "rejected";
+        if (
+          reply.payload.coordination_result &&
+          (reply.payload.coordination_result.request_message_id !==
+            claim.envelope.message_id ||
+            reply.payload.coordination_result.outcome !==
+              (outcome === "processed" ? "completed" : "rejected"))
+        ) {
+          throw new StateTransitionError(
+            "The persisted deterministic result has inconsistent outcome metadata.",
+          );
+        }
+        if (priorResult.state === "quarantined" || priorResult.state === "expired") {
+          throw new DispatchResultUnavailableError(
+            "The persisted deterministic result is not deliverable.",
+          );
+        }
+        this.database.settleInboxWithReply({
+          messageId: claim.envelope.message_id,
+          consumerId: this.consumerId,
+          claimToken: claim.claimToken,
+          outcome,
+          replyEnvelope: reply,
+        });
+        return;
+      }
+
+      if (
+        claim.envelope.expires_at_utc &&
+        Date.parse(claim.envelope.expires_at_utc) <= Date.now()
+      ) {
+        throw new DispatchRejectedError(
+          "The read-only request expired before worker execution could begin.",
+        );
+      }
+
       const executionController = new AbortController();
       const cancelExecution = (): void => executionController.abort();
       abortSignal?.addEventListener("abort", cancelExecution, {
@@ -173,7 +235,17 @@ export class ReadOnlyDispatcher {
         if (renewalError) {
           throw renewalError;
         }
+        if (executionController.signal.aborted) {
+          throw new CodexExecutionError(
+            "CODEX_ABORTED",
+            "Runtime cancellation prevents publishing the worker result.",
+          );
+        }
       } catch (error) {
+        if (error instanceof CodexExecutionError &&
+            error.code === "CODEX_TERMINATION_FAILED") {
+          throw error;
+        }
         if (renewalError) {
           throw renewalError;
         }
@@ -215,7 +287,8 @@ export class ReadOnlyDispatcher {
       }
       if (
         error instanceof CodexExecutionError &&
-        error.code === "CODEX_ABORTED"
+        (error.code === "CODEX_ABORTED" ||
+          error.code === "CODEX_TERMINATION_FAILED")
       ) {
         throw error;
       }

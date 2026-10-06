@@ -22,6 +22,13 @@ afterEach(() => {
 });
 
 describe("message authentication", () => {
+  it("exposes the loaded public network binding without signing a message", () => {
+    const a = createNode("node-a", ["node-b"]);
+    const b = createNode("node-b", ["node-a"]);
+    writeMembership(a, [peer("node-b", b.publicKeyDer)]);
+    expect(a.authenticator().networkId).toBe("bridge-net");
+  });
+
   it("signs and verifies a valid Ed25519 wire wrapper", () => {
     const a = createNode("node-a", ["node-b"]);
     const b = createNode("node-b", ["node-a"]);

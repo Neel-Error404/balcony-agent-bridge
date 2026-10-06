@@ -23,6 +23,7 @@ describe("AgentBridgeService", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     database.close();
   });
@@ -153,7 +154,7 @@ describe("AgentBridgeService", () => {
         body: "The repository is available and clean.",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: first.task_id,
           outcome: "completed",
         },
@@ -170,6 +171,80 @@ describe("AgentBridgeService", () => {
         body: "The repository is available and clean.",
       },
     });
+    const continued = service.continueAgent({
+      previousResultMessageId: reply.message_id,
+      idempotencyKey: "no-delegation-continuation",
+      subject: "Continue local evidence",
+      request: "Stay local.",
+      intent: "question",
+      timeoutSeconds: 120,
+    });
+    expect(database.getOutboxMessage(continued.task_id)?.envelope.payload.coordination_request)
+      .toHaveProperty("delegation", { mode: "none" });
+  });
+
+  it("defaults new coordination tasks to a versioned no-delegation contract", () => {
+    const request = service.askAgent({
+      idempotencyKey: "no-delegation-default",
+      targetNodeId: "SYS-B",
+      projectId: "voiceai-platform",
+      subject: "Local evidence only",
+      request: "Inspect local approved evidence.",
+      intent: "inspect",
+      timeoutSeconds: 120,
+      evidenceMode: "pinned_git",
+    });
+    expect(database.getOutboxMessage(request.task_id)?.envelope.payload.coordination_request)
+      .toEqual({
+        protocol_version: "1.1",
+        intent: "inspect",
+        access_mode: "read_only",
+        delegation: { mode: "none" },
+      });
+  });
+
+  it("preserves explicit bounded authority and rejects changed idempotent reuse", () => {
+    const input = {
+      idempotencyKey: "explicit-bounded-authority",
+      targetNodeId: "SYS-B" as const,
+      projectId: "voiceai-platform",
+      subject: "Bounded peer evidence",
+      request: "Inspect within an explicit peer budget.",
+      intent: "inspect" as const,
+      timeoutSeconds: 120,
+      delegation: { mode: "bounded" as const, max_depth: 1 },
+    };
+    const request = service.askAgent(input);
+    expect(database.getOutboxMessage(request.task_id)?.envelope.payload.coordination_request)
+      .toHaveProperty("delegation", { mode: "bounded", max_depth: 1 });
+    expect(() => service.askAgent({
+      ...input,
+      delegation: { mode: "bounded", max_depth: 2 },
+    })).toThrow(/IDEMPOTENCY_CONFLICT|different message content/);
+  });
+
+  it("does not treat a legacy result as proof of a new delegation contract", () => {
+    const request = service.askAgent({
+      idempotencyKey: "legacy-result-new-contract",
+      targetNodeId: "SYS-B", projectId: "voiceai-platform",
+      subject: "No delegation", request: "Inspect locally.",
+      intent: "inspect", timeoutSeconds: 120,
+    });
+    const result = createEnvelope({
+      idempotencyKey: "legacy-result-new-contract-reply",
+      originSystem: "SYS-B", targetSystem: "SYS-A",
+      kind: "task_result", streamId: "agent-coordination",
+      conversationId: request.conversation_id, causationId: request.task_id,
+      payload: {
+        subject: "Legacy answer", body: "Cannot prove the new policy.", evidence: [],
+        coordination_result: {
+          protocol_version: "1.0", request_message_id: request.task_id, outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(result, 1, new Date(), true);
+    expect(() => service.getAgentResult(request.task_id))
+      .toThrow(/protocol version/);
   });
 
   it("retries an explicit coordination conversation idempotently", () => {
@@ -202,6 +277,155 @@ describe("AgentBridgeService", () => {
       duplicate: true,
       conversation_id: conversationId,
     });
+  });
+
+  it("reports a sent task without a reply as failed when its explicit deadline passes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-05T03:00:00.000Z"));
+    const request = service.askAgent({
+      idempotencyKey: "deadline-without-reply",
+      targetNodeId: "SYS-B",
+      projectId: "voiceai-platform",
+      subject: "Bounded question",
+      request: "Return the current project status.",
+      intent: "question",
+      timeoutSeconds: 120,
+      expiresAtUtc: "2026-10-05T09:00:00+05:30",
+    });
+    database.leaseOutbox("bridge", 1, 30, new Date());
+    database.markOutboxSent(request.task_id, "bridge", new Date());
+    expect(service.getAgentResult(request.task_id)).toMatchObject({
+      status: "waiting",
+      delivery_state: "sent",
+    });
+
+    vi.setSystemTime(new Date("2026-10-05T03:30:00.000Z"));
+    expect(service.getAgentResult(request.task_id)).toMatchObject({
+      status: "failed",
+      delivery_state: "sent",
+      failure_code: "TASK_DEADLINE_EXCEEDED",
+      deadline_at_utc: "2026-10-05T03:30:00.000Z",
+      remote_cancellation_confirmed: false,
+    });
+  });
+
+  it.each([
+    ["2026-10-05T03:29:59.000Z", "completed"],
+    ["2026-10-05T03:30:00.000Z", "failed"],
+    ["2026-10-05T03:30:01.000Z", "failed"],
+  ])("keeps deadline outcome based on durable arrival at %s", (receivedAt, status) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-05T03:00:00.000Z"));
+    const request = service.askAgent({
+      idempotencyKey: `deadline-answer:${receivedAt}`,
+      targetNodeId: "SYS-B",
+      projectId: "voiceai-platform",
+      subject: "Bounded question",
+      request: "Return the current project status.",
+      intent: "question",
+      timeoutSeconds: 120,
+      expiresAtUtc: "2026-10-05T03:30:00.000Z",
+    });
+    const reply = createEnvelope({
+      idempotencyKey: `deadline-reply:${receivedAt}`,
+      originSystem: "SYS-B",
+      targetSystem: "SYS-A",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: request.conversation_id,
+      causationId: request.task_id,
+      now: new Date("2026-10-05T03:20:00.000Z"),
+      payload: {
+        subject: "Inspection complete",
+        body: "This answer must not undo an expired deadline.",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.1",
+          request_message_id: request.task_id,
+          outcome: "completed",
+        },
+      },
+    });
+    database.persistIncoming(reply, 1, new Date(receivedAt), true);
+    vi.setSystemTime(new Date("2026-10-05T04:00:00.000Z"));
+
+    const outcome = service.getAgentResult(request.task_id);
+    expect(outcome.status).toBe(status);
+    if (status === "failed") {
+      expect(outcome).toMatchObject({
+        failure_code: "TASK_DEADLINE_EXCEEDED",
+        late_result_message_id: reply.message_id,
+        remote_cancellation_confirmed: false,
+      });
+      expect(outcome).not.toHaveProperty("result");
+      expect(() => service.continueAgent({
+        previousResultMessageId: reply.message_id,
+        idempotencyKey: `late-continuation:${receivedAt}`,
+        subject: "Continue",
+        request: "This must not revive a failed task.",
+        intent: "question",
+        timeoutSeconds: 120,
+      })).toThrow("not a timely completed peer coordination result");
+    } else {
+      expect(outcome).toHaveProperty("result_message_id", reply.message_id);
+    }
+  });
+
+  it("does not continue a later non-authoritative answer when an earlier timely reply completed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-05T03:00:00.000Z"));
+    const request = service.askAgent({
+      idempotencyKey: "one-authoritative-answer",
+      targetNodeId: "SYS-B",
+      projectId: "voiceai-platform",
+      subject: "Bounded question",
+      request: "Return the current project status.",
+      intent: "question",
+      timeoutSeconds: 120,
+      expiresAtUtc: "2026-10-05T03:30:00.000Z",
+    });
+    const replies = [
+      ["timely", "2026-10-05T03:29:00.000Z"],
+      ["late", "2026-10-05T03:31:00.000Z"],
+    ].map(([key, receivedAt], index) => {
+      const reply = createEnvelope({
+        idempotencyKey: `one-authoritative-answer:${key}`,
+        originSystem: "SYS-B",
+        targetSystem: "SYS-A",
+        kind: "task_result",
+        streamId: "agent-coordination",
+        conversationId: request.conversation_id,
+        causationId: request.task_id,
+        sequenceNumber: index + 1,
+        now: new Date(receivedAt!),
+        payload: {
+          subject: "Inspection complete",
+          body: `Result ${key}`,
+          project: "voiceai-platform",
+          evidence: [],
+          coordination_result: {
+            protocol_version: "1.1",
+            request_message_id: request.task_id,
+            outcome: "completed",
+          },
+        },
+      });
+      database.persistIncoming(reply, 1, new Date(receivedAt!), true);
+      return reply;
+    });
+    vi.setSystemTime(new Date("2026-10-05T04:00:00.000Z"));
+    expect(service.getAgentResult(request.task_id)).toHaveProperty(
+      "result_message_id",
+      replies[0]!.message_id,
+    );
+    expect(() => service.continueAgent({
+      previousResultMessageId: replies[1]!.message_id,
+      idempotencyKey: "must-not-continue-late-alternative",
+      subject: "Continue",
+      request: "This must not select the alternative answer.",
+      intent: "question",
+      timeoutSeconds: 120,
+    })).toThrow("not the authoritative timely peer coordination result");
   });
 
   it("rejects changing the explicit conversation on an idempotent retry", () => {
@@ -252,7 +476,7 @@ describe("AgentBridgeService", () => {
         project: "voiceai-platform",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },
@@ -274,7 +498,7 @@ describe("AgentBridgeService", () => {
         project: "voiceai-platform",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },
@@ -296,7 +520,7 @@ describe("AgentBridgeService", () => {
         project: "another-project",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },
@@ -372,7 +596,7 @@ describe("AgentBridgeService", () => {
         project: "voiceai-platform",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },
@@ -427,7 +651,7 @@ describe("AgentBridgeService", () => {
         project: "voiceai-platform",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: request.task_id,
           outcome: "completed",
         },

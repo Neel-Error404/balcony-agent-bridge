@@ -62,6 +62,22 @@ describe("MCP server", () => {
     );
   });
 
+  it("accepts explicit bounded delegation through the caller tool", async () => {
+    const output = toolOutput(await client.callTool({
+      name: "agent_bridge_ask_agent",
+      arguments: {
+        idempotency_key: "mcp-explicit-delegation",
+        target_node_id: "SYS-B",
+        project_id: "voiceai",
+        subject: "Explicit bounded consultation",
+        request: "Inspect approved peer evidence.",
+        delegation: { mode: "bounded", max_depth: 1 },
+      },
+    })) as { task_id: string };
+    expect(database.getOutboxMessage(output.task_id)?.envelope.payload.coordination_request)
+      .toHaveProperty("delegation", { mode: "bounded", max_depth: 1 });
+  });
+
   it("creates an idempotent coordination task and returns its linked result", async () => {
     const askArguments = {
       idempotency_key: "mcp-coordinate-1",
@@ -125,7 +141,7 @@ describe("MCP server", () => {
         project: "voiceai",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: first.task_id,
           outcome: "completed",
         },

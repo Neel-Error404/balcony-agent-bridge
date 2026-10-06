@@ -112,6 +112,10 @@ export class MessageAuthenticator {
     this.peerKeys = buildPeerKeyIndex(membership);
   }
 
+  public get networkId(): string {
+    return this.membership.network_id;
+  }
+
   public sign(envelopeValue: unknown, now = new Date()): MessageAuthWire {
     try {
       const envelope = BridgeEnvelopeSchema.parse(envelopeValue);

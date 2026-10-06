@@ -21,6 +21,7 @@ import {
   type ConsultationEvidenceProvider,
 } from "../../src/coordination/autonomous-consultation-coordinator.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
+import { CodexExecutionError } from "../../src/errors.js";
 
 describe("AutonomousConsultationCoordinator", () => {
   let root: string;
@@ -68,7 +69,7 @@ describe("AutonomousConsultationCoordinator", () => {
   });
 
   it("parks local evidence needs durably and resumes to completion", async () => {
-    const request = incomingRequest();
+    const request = incomingRequest({ mode: "none" });
     database.persistIncoming(request, 1, now(0), true);
     executor.outputs.push(
       childResult({
@@ -139,14 +140,19 @@ describe("AutonomousConsultationCoordinator", () => {
         },
       ],
       coordination_result: {
+        protocol_version: "1.1",
         request_message_id: request.message_id,
         outcome: "completed",
       },
     });
+    expect(executor.inputs[0]?.prompt).toContain(
+      "Delegation is prohibited for this request.",
+    );
+    expect(executor.inputs[0]?.prompt).not.toContain('"peer_request"');
   });
 
   it("creates a correlated nested peer request and resumes from its result", async () => {
-    const request = incomingRequest();
+    const request = incomingRequest({ mode: "bounded", max_depth: 2 });
     database.persistIncoming(request, 1, now(0), true);
     executor.outputs.push(
       childResult({
@@ -177,6 +183,7 @@ describe("AutonomousConsultationCoordinator", () => {
     expect(waiting).toMatchObject({
       state: "waiting_peer",
       nested_task_id: expect.any(String),
+      delegation: { mode: "bounded", max_depth: 2 },
     });
     const nested = database.getOutboxMessage(waiting.nested_task_id!);
     const nestedTaskId = waiting.nested_task_id!;
@@ -187,6 +194,10 @@ describe("AutonomousConsultationCoordinator", () => {
       causation_id: request.message_id,
       payload: {
         project: "balcony-agent-bridge",
+        coordination_request: {
+          protocol_version: "1.1",
+          delegation: { mode: "bounded", max_depth: 2 },
+        },
         consultation_context: {
           root_request_id: request.message_id,
           parent_request_id: request.message_id,
@@ -228,7 +239,7 @@ describe("AutonomousConsultationCoordinator", () => {
         body: "The canonical worker heartbeat is healthy.",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: nestedTaskId,
           outcome: "completed",
         },
@@ -262,6 +273,46 @@ describe("AutonomousConsultationCoordinator", () => {
     expect(executor.inputs[1]?.prompt).toContain(
       '"source":"peer_result"',
     );
+    expect(executor.inputs[0]?.prompt).toContain('"peer_request"');
+    const final = database.getOutboxByIdempotency(
+      "SYS-A",
+      `consultation-result:${request.message_id}`,
+    );
+    expect(final?.envelope.payload.coordination_result?.protocol_version).toBe(
+      "1.1",
+    );
+  });
+
+  it("uses the minimum of caller and local delegation depth for nested tasks", async () => {
+    const request = incomingRequest({ mode: "bounded", max_depth: 1 });
+    database.persistIncoming(request, 1, now(0), true);
+    executor.outputs.push(
+      childResult({
+        outcome: "needs_information",
+        reason: "Ask the peer.",
+        peer_request: {
+          subject: "Inspect runtime",
+          request: "Return peer runtime status.",
+          intent: "inspect",
+        },
+        evidence_paths: [],
+      }),
+    );
+    await coordinator.runOnce(now(1));
+    await coordinator.runOnce(now(2));
+    const run = database.getConsultationRun(request.message_id)!;
+    expect(run).toMatchObject({
+      max_depth: 1,
+      delegation: { mode: "bounded", max_depth: 1 },
+    });
+    const nested = database.getOutboxMessage(run.nested_task_id!);
+    expect(nested?.envelope.payload).toMatchObject({
+      coordination_request: {
+        protocol_version: "1.1",
+        delegation: { mode: "bounded", max_depth: 1 },
+      },
+      consultation_context: { depth: 1, max_depth: 1 },
+    });
   });
 
   it("preserves pinned Git snapshot metadata when evidence is merged", async () => {
@@ -314,6 +365,30 @@ describe("AutonomousConsultationCoordinator", () => {
     ]);
   });
 
+  it("does not save or publish a child result resolving after runtime abort", async () => {
+    const request = incomingRequest({ mode: "none" });
+    database.persistIncoming(request, 1, now(0), true);
+    const controller = new AbortController();
+    let complete = (): void => undefined;
+    const raced = createCoordinator(
+      new ProjectEvidenceProvider(),
+      {
+        execute: async () => new Promise<CodexExecutionResult>(resolve => {
+          complete = () => resolve(childResult({
+            outcome: "completed", answer: "Must not publish.", evidence_paths: [],
+          }));
+        }),
+      },
+    );
+    const run = raced.runOnce(now(1), controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    complete();
+    await expect(run).rejects.toMatchObject({ code: "CODEX_ABORTED" });
+    expect(database.getConsultationRun(request.message_id)?.state).toBe("pending_child");
+    expect(database.getStatus().outbox.pending).toBe(0);
+  });
+
   it("cannot settle with a claim that expired during child execution", async () => {
     const request = incomingRequest();
     const start = now(1);
@@ -350,6 +425,24 @@ describe("AutonomousConsultationCoordinator", () => {
       "processed",
     );
     expect(database.getStatus().outbox.pending).toBe(1);
+  });
+
+  it("preserves the consultation claim when executor termination is unverified", async () => {
+    const request = incomingRequest({ mode: "none" });
+    database.persistIncoming(request, 1, now(0), true);
+    const unsafe = createCoordinator(new ProjectEvidenceProvider(), {
+      execute: async () => {
+        throw new CodexExecutionError(
+          "CODEX_TERMINATION_FAILED", "Test executor did not close.",
+        );
+      },
+    });
+    await expect(unsafe.runOnce(now(1))).rejects.toMatchObject({
+      code: "CODEX_TERMINATION_FAILED",
+    });
+    expect(database.getConsultationRun(request.message_id)?.state).toBe("pending_child");
+    expect(database.getInboxMessage(request.message_id)?.state).toBe("claimed");
+    expect(database.getStatus().outbox.pending).toBe(0);
   });
 
   function createCoordinator(
@@ -437,7 +530,9 @@ class PinnedEvidenceProvider {
   }
 }
 
-function incomingRequest() {
+function incomingRequest(
+  delegation?: { mode: "none" } | { mode: "bounded"; max_depth: number },
+) {
   return createEnvelope({
     idempotencyKey: "consultation-request",
     originSystem: "SYS-A",
@@ -457,11 +552,18 @@ function incomingRequest() {
         timeout_seconds: 120,
         evidence_mode: "pinned_git",
       },
-      coordination_request: {
-        protocol_version: "1.0",
-        intent: "inspect",
-        access_mode: "read_only",
-      },
+      coordination_request: delegation
+        ? {
+            protocol_version: "1.1",
+            intent: "inspect",
+            access_mode: "read_only",
+            delegation,
+          }
+        : {
+            protocol_version: "1.0",
+            intent: "inspect",
+            access_mode: "read_only",
+          },
     },
     now: now(0),
   });

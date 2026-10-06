@@ -21,42 +21,8 @@ import { BridgeDatabase } from "../storage/database.js";
 import { LocalCodexExecutor } from "./codex-executor.js";
 import { ReadOnlyDispatcher } from "./dispatcher.js";
 import { ProjectRegistry } from "./project-registry.js";
-
-async function run(
-  dispatcher: ForegroundDispatcher,
-  controller: AbortController,
-  pollIntervalMs: number,
-): Promise<void> {
-  dispatcher.recordHeartbeat("healthy");
-  let lastHeartbeat = Date.now();
-
-  while (!controller.signal.aborted) {
-    try {
-      const processed = await dispatcher.runOnce(
-        new Date(),
-        controller.signal,
-      );
-      if (
-        processed > 0 ||
-        Date.now() - lastHeartbeat >= 5 * 60 * 1000
-      ) {
-        dispatcher.recordHeartbeat("healthy");
-        lastHeartbeat = Date.now();
-      }
-      if (processed === 0) {
-        await sleep(pollIntervalMs, controller.signal);
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        break;
-      }
-      const code = safeErrorCode(error);
-      dispatcher.recordHeartbeat("degraded", code);
-      console.error(`Read-only dispatcher cycle failed (${code})`);
-      await sleep(Math.max(2000, pollIntervalMs), controller.signal);
-    }
-  }
-}
+import { serviceParentSupervisionEnabled, superviseParent } from "../runtime/parent-supervision.js";
+import { assertDispatcherTerminationVerified, runDispatcher, type ForegroundDispatcher } from "./runtime.js";
 
 try {
   const { values, positionals } = parseArgs({
@@ -85,11 +51,17 @@ try {
       "Internal: node dist/dispatcher/index.js [--config <absolute-path>] [--validate-config]\n",
     );
   } else {
+    const parentSupervised = serviceParentSupervisionEnabled(
+      process.env["BALCONY_RUNTIME_SUPERVISION"],
+    );
     const bridgeConfig = values.config
       ? assertConfigMatchesProcessIdentity(loadConfigFile(values.config))
       : loadConfig();
     const config = loadReadOnlyDispatcherConfig(process.env, bridgeConfig);
     const database = new BridgeDatabase(config.databasePath);
+    // Must run before supervision callbacks or healthy startup can overwrite
+    // a durable unverified-executor failure left by the prior service process.
+    assertDispatcherTerminationVerified(database);
     const projects = ProjectRegistry.load(config.projectsPath);
     const executor = new LocalCodexExecutor(
       config.codexExecutable,
@@ -121,9 +93,26 @@ try {
       const controller = new AbortController();
       process.once("SIGINT", () => controller.abort());
       process.once("SIGTERM", () => controller.abort());
+      const stopSupervision = superviseParent(controller, {
+        enabled: parentSupervised,
+        onFailure: (code) => {
+          dispatcher.recordHeartbeat("degraded", code);
+          console.error(`Dispatcher supervision failed (${code})`);
+          process.exitCode = 1;
+        },
+      });
       try {
-        await run(dispatcher, controller, config.pollIntervalMs);
+        await runDispatcher(dispatcher, controller, config.pollIntervalMs, database);
+      } catch (error) {
+        if (safeErrorCode(error) === "CODEX_TERMINATION_FAILED") {
+          console.error("Dispatcher stopped: Codex worker quiescence requires operator verification.");
+          // Do not wait indefinitely on inherited pipes or let an automatic
+          // service restart claim work over an unverified surviving executor.
+          process.exit(1);
+        }
+        throw error;
       } finally {
+        stopSupervision();
         database.close();
       }
     }
@@ -133,31 +122,6 @@ try {
     `Read-only dispatcher process failed (${safeErrorCode(error)})`,
   );
   process.exitCode = 1;
-}
-
-async function sleep(
-  milliseconds: number,
-  signal: AbortSignal,
-): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
-}
-
-interface ForegroundDispatcher {
-  runOnce(now?: Date, abortSignal?: AbortSignal): Promise<number>;
-  recordHeartbeat(
-    status: "healthy" | "degraded",
-    lastErrorCode?: string,
-  ): void;
 }
 
 function createConsultationDispatcher(

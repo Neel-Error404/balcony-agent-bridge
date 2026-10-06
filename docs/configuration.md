@@ -161,13 +161,22 @@ Use the local operator CLI against the bridge database:
 ```
 
 `approve-once` authorizes and consumes only its exact original request. An
-ordinary dispatch retry is rejected; only an already-created durable
-consultation run may resume its same workflow. A different-message replay is
-never authorized. `approve-temporary` applies only to the exact peer/resource
+exact-request retry can resume its consumed durable reservation while the
+resource and reservation remain authorized. A matching persisted deterministic
+reply is reused without another worker execution. A different-message replay is
+never authorized. A consumed reservation may be revoked; this blocks future
+recovery, not an already-running worker or already-enqueued reply.
+`approve-temporary` applies only to the exact peer/resource
 pair and only while `--expires-at-utc` is a future canonical UTC instant.
 Revoking the pair's persistent grant also revokes its active temporary
 approvals. Expiry, deny, and revoke fail closed. The audit is append-only and contains only decision
 metadata, never request bodies, filesystem paths, credentials, or claim tokens.
+
+Request expiry is checked as a UTC instant before authorization and worker
+startup. An expired unstarted request does not acquire new execution authority.
+An existing consultation may settle or time out only with valid authorization;
+its completed state alone is not permission to disclose its answer. A consumed
+exact request may settle a matching persisted result without re-execution.
 
 ## Configuration That Must Stay Local
 

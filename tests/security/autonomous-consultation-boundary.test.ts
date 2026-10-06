@@ -47,7 +47,7 @@ describe("autonomous consultation safety controls", () => {
     expect(harness.executor.inputs).toHaveLength(0);
   });
 
-  it("claims an expired consultation request to settle its timeout", async () => {
+  it("rejects an expired unstarted consultation without creating a run or executing", async () => {
     const harness = createHarness({ runTimeoutSeconds: 30 });
     const request = createEnvelope({
       idempotencyKey: "expired-consultation",
@@ -82,10 +82,14 @@ describe("autonomous consultation safety controls", () => {
     );
     expect(
       harness.database.getConsultationRun(request.message_id),
-    ).toMatchObject({
-      state: "failed",
-      error_code: "CONSULTATION_TIMED_OUT",
-    });
+    ).toBeUndefined();
+    expect(harness.executor.inputs).toHaveLength(0);
+    expect(
+      harness.database.getOutboxByIdempotency(
+        "SYS-A",
+        `consultation-failure:${request.message_id}`,
+      ),
+    ).toBeDefined();
   });
 
   it("stops before sending a peer request at the depth limit", async () => {
@@ -95,11 +99,12 @@ describe("autonomous consultation safety controls", () => {
       maxDepth: 2,
       rootRequestId: "11111111-1111-4111-8111-111111111111",
       parentRequestId: "22222222-2222-4222-8222-222222222222",
-    });
+    }, { mode: "bounded", max_depth: 2 });
     harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(peerNeed());
 
     await harness.coordinator.runOnce(now(1));
+    expect(harness.executor.inputs[0]?.prompt).not.toContain('"peer_request"');
     await harness.coordinator.runOnce(now(2));
 
     expect(
@@ -118,7 +123,7 @@ describe("autonomous consultation safety controls", () => {
 
   it("detects a peer-request cycle before enqueueing it", async () => {
     const harness = createHarness();
-    const request = incomingRequest();
+    const request = incomingRequest(undefined, { mode: "bounded", max_depth: 2 });
     harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(
       result({
@@ -141,6 +146,92 @@ describe("autonomous consultation safety controls", () => {
     ).toMatchObject({
       state: "failed",
       error_code: "CONSULTATION_CYCLE_DETECTED",
+    });
+    expect(harness.database.getStatus().outbox.pending).toBe(1);
+  });
+
+  it.each([
+    ["legacy 1.0", undefined, "1.0"],
+    ["explicit 1.1 none", { mode: "none" } as const, "1.1"],
+  ])("rejects %s model peer requests before parking or enqueueing", async (
+    _label,
+    delegation,
+    version,
+  ) => {
+    const harness = createHarness();
+    const request = incomingRequest(undefined, delegation);
+    harness.database.persistIncoming(request, 1, now(0), true);
+    harness.executor.outputs.push(peerNeed());
+
+    expect(await harness.coordinator.runOnce(now(1))).toBe(1);
+    expect(harness.database.getConsultationRun(request.message_id)).toMatchObject({
+      state: "failed",
+      error_code: "CONSULTATION_DELEGATION_PROHIBITED",
+      delegation: { mode: "none" },
+      max_depth: 0,
+    });
+    expect(harness.database.getStatus().outbox.pending).toBe(1);
+    const failure = harness.database.getOutboxByIdempotency(
+      "SYS-A",
+      `consultation-failure:${request.message_id}`,
+    );
+    expect(failure?.envelope.payload.coordination_result).toMatchObject({
+      protocol_version: version,
+      request_message_id: request.message_id,
+      outcome: "rejected",
+    });
+  });
+
+  it("treats a zero-depth context as no remaining delegation authority", async () => {
+    const harness = createHarness();
+    const project = "balcony-agent-bridge";
+    const subject = "Inspect without delegation";
+    const body = "Return only a bounded answer.";
+    const rootId = "11111111-1111-4111-8111-111111111111";
+    const request = createEnvelope({
+      idempotencyKey: "zero-depth-context",
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_request",
+      streamId: "agent-coordination",
+      correlationId: rootId,
+      payload: {
+        project,
+        subject,
+        body,
+        evidence: [],
+        dispatch: {
+          executor: "codex_cli",
+          access: "read_only",
+          evidence_mode: "pinned_git",
+        },
+        coordination_request: {
+          protocol_version: "1.1",
+          intent: "inspect",
+          access_mode: "read_only",
+          delegation: { mode: "bounded", max_depth: 2 },
+        },
+        consultation_context: {
+          protocol_version: "1.0",
+          root_request_id: rootId,
+          depth: 0,
+          max_depth: 0,
+          ancestry_fingerprints: [
+            consultationRequestFingerprint({ project, subject, request: body }),
+          ],
+        },
+      },
+      now: now(0),
+    });
+    harness.database.persistIncoming(request, 1, now(0), true);
+    harness.executor.outputs.push(peerNeed());
+
+    expect(await harness.coordinator.runOnce(now(1))).toBe(1);
+    expect(harness.database.getConsultationRun(request.message_id)).toMatchObject({
+      delegation: { mode: "none" },
+      max_depth: 0,
+      state: "failed",
+      error_code: "CONSULTATION_DELEGATION_PROHIBITED",
     });
     expect(harness.database.getStatus().outbox.pending).toBe(1);
   });
@@ -180,7 +271,7 @@ describe("autonomous consultation safety controls", () => {
 
   it("ignores a peer result outside the correlated nested conversation", async () => {
     const harness = createHarness();
-    const request = incomingRequest();
+    const request = incomingRequest(undefined, { mode: "bounded", max_depth: 2 });
     harness.database.persistIncoming(request, 1, now(0), true);
     harness.executor.outputs.push(peerNeed());
 
@@ -203,7 +294,7 @@ describe("autonomous consultation safety controls", () => {
         body: "This result belongs to a different conversation.",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: "1.1",
           request_message_id: run.nested_task_id!,
           outcome: "completed",
         },
@@ -228,6 +319,56 @@ describe("autonomous consultation safety controls", () => {
       state: "waiting_peer",
       nested_task_id: run.nested_task_id,
     });
+  });
+
+  it("rejects a legacy result for a nested 1.1 request before incorporating peer evidence", async () => {
+    const harness = createHarness();
+    const request = incomingRequest(undefined, { mode: "bounded", max_depth: 2 });
+    harness.database.persistIncoming(request, 1, now(0), true);
+    harness.executor.outputs.push(peerNeed());
+
+    await harness.coordinator.runOnce(now(1));
+    await harness.coordinator.runOnce(now(2));
+    const run = harness.database.getConsultationRun(request.message_id)!;
+    const nested = harness.database.getOutboxMessage(run.nested_task_id!)!;
+    expect(nested.envelope.payload.coordination_request?.protocol_version).toBe(
+      "1.1",
+    );
+    const legacyResult = createEnvelope({
+      idempotencyKey: "legacy-result-for-v1-1-nested",
+      originSystem: "SYS-A",
+      targetSystem: "SYS-B",
+      kind: "task_result",
+      streamId: "agent-coordination",
+      conversationId: nested.envelope.conversation_id,
+      correlationId: request.message_id,
+      causationId: nested.envelope.message_id,
+      payload: {
+        project: "balcony-agent-bridge",
+        subject: "Peer runtime",
+        body: "A valid-looking but legacy-version peer observation.",
+        evidence: [],
+        coordination_result: {
+          protocol_version: "1.0",
+          request_message_id: nested.envelope.message_id,
+          outcome: "completed",
+        },
+      },
+      now: now(3),
+    });
+    harness.database.persistIncoming(legacyResult, 1, now(3), true);
+
+    expect(await harness.coordinator.runOnce(now(8))).toBe(1);
+    expect(harness.database.getConsultationRun(request.message_id)).toMatchObject({
+      state: "failed",
+      error_code: "CONSULTATION_PEER_RESULT_INVALID",
+      evidence: { items: [] },
+    });
+    expect(harness.executor.inputs).toHaveLength(1);
+    expect(harness.database.getOutboxByIdempotency(
+      "SYS-A",
+      `consultation-failure:${request.message_id}`,
+    )?.envelope.payload.coordination_result?.protocol_version).toBe("1.1");
   });
 
   it("settles an unallowlisted project request instead of stranding its claim", async () => {
@@ -366,6 +507,7 @@ function incomingRequest(
     rootRequestId: string;
     parentRequestId: string;
   },
+  delegation?: { mode: "none" } | { mode: "bounded"; max_depth: number },
 ) {
   const project = "balcony-agent-bridge";
   const subject = "Inspect bounded coordination";
@@ -399,11 +541,18 @@ function incomingRequest(
         access: "read_only",
         evidence_mode: "pinned_git",
       },
-      coordination_request: {
-        protocol_version: "1.0",
-        intent: "inspect",
-        access_mode: "read_only",
-      },
+      coordination_request: delegation
+        ? {
+            protocol_version: "1.1",
+            intent: "inspect",
+            access_mode: "read_only",
+            delegation,
+          }
+        : {
+            protocol_version: "1.0",
+            intent: "inspect",
+            access_mode: "read_only",
+          },
       ...(nested
         ? {
             consultation_context: {

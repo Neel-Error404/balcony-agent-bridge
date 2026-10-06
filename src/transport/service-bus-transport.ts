@@ -151,8 +151,11 @@ export class ServiceBusBridgeTransport implements BridgeTransport {
       }
       throw error;
     } finally {
-      await receiver?.close();
-      this.receiveInProgress = false;
+      try {
+        await receiver?.close();
+      } finally {
+        this.receiveInProgress = false;
+      }
     }
   }
 

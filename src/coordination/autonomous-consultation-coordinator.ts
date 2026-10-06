@@ -11,6 +11,7 @@ import {
   consultationRequestFingerprint,
   type ConsultationRun,
 } from "../contracts/consultation.js";
+import type { DelegationPolicy } from "../contracts/coordination.js";
 import {
   EVIDENCE_SCHEMA_VERSION,
   EvidenceBundleSchema,
@@ -96,6 +97,7 @@ export class AutonomousConsultationCoordinator {
     now = new Date(),
     abortSignal?: AbortSignal,
   ): Promise<number> {
+    if (abortSignal?.aborted) return 0;
     const claims = this.database.claimAutonomousConsultationInbox(
       this.consumerId,
       1,
@@ -161,7 +163,11 @@ export class AutonomousConsultationCoordinator {
     }
 
     try {
-      if (now.toISOString() >= run.deadline_at_utc) {
+      if (
+        run.state !== "completed" &&
+        run.state !== "failed" &&
+        now.toISOString() >= run.deadline_at_utc
+      ) {
         this.fail(run, claim, "CONSULTATION_TIMED_OUT", now);
         return true;
       }
@@ -187,7 +193,8 @@ export class AutonomousConsultationCoordinator {
         error instanceof EvidencePolicyError ||
         error instanceof DispatchRejectedError ||
         (error instanceof CodexExecutionError &&
-          error.code !== "CODEX_ABORTED")
+          error.code !== "CODEX_ABORTED" &&
+          error.code !== "CODEX_TERMINATION_FAILED")
       ) {
         this.fail(run, claim, error.code, now);
         return true;
@@ -223,10 +230,10 @@ export class AutonomousConsultationCoordinator {
         "The consultation request does not match its ancestry fingerprint.",
       );
     }
-    const maxDepth = Math.min(
-      context?.max_depth ?? this.policy.maxDepth,
-      this.policy.maxDepth,
-    );
+    const delegation = this.effectiveDelegation(envelope);
+    const maxDepth = delegation.mode === "bounded"
+      ? delegation.max_depth
+      : 0;
     const depth = context?.depth ?? 0;
     if (depth > maxDepth) {
       throw new DispatchRejectedError(
@@ -257,6 +264,7 @@ export class AutonomousConsultationCoordinator {
         depth,
         max_rounds: this.policy.maxRounds,
         max_depth: maxDepth,
+        delegation,
         ancestry_fingerprints: ancestry,
         deadline_at_utc: deadline.toISOString(),
         evidence: emptyEvidence(projectKey, now),
@@ -277,6 +285,9 @@ export class AutonomousConsultationCoordinator {
       this.fail(run, claim, "CONSULTATION_ROUND_LIMIT", now);
       return;
     }
+    const canDelegate =
+      run.delegation.mode === "bounded" &&
+      run.depth < run.max_depth;
     const timeoutSeconds = Math.max(
       1,
       Math.min(
@@ -294,11 +305,18 @@ export class AutonomousConsultationCoordinator {
         request: claim.envelope.payload.body,
         priorDiscussion: "",
         evidence: run.evidence,
+        delegation: canDelegate ? run.delegation : { mode: "none" },
       }),
       timeoutSeconds,
       maxOutputBytes: this.policy.maxOutputBytes,
       ...(abortSignal ? { abortSignal } : {}),
     });
+    if (abortSignal?.aborted) {
+      throw new CodexExecutionError(
+        "CODEX_ABORTED",
+        "Runtime cancellation prevents saving the consultation child result.",
+      );
+    }
     const completedAt = this.operationTime(now);
     const child = parseEvidenceOnlyChildResult(
       result.output,
@@ -318,6 +336,17 @@ export class AutonomousConsultationCoordinator {
         completedAt,
       );
       this.complete(completed, claim, completedAt);
+      return;
+    }
+    if (child.peer_request && !canDelegate) {
+      this.fail(
+        run,
+        claim,
+        run.delegation.mode === "bounded"
+          ? "CONSULTATION_DEPTH_LIMIT"
+          : "CONSULTATION_DELEGATION_PROHIBITED",
+        completedAt,
+      );
       return;
     }
 
@@ -383,8 +412,21 @@ export class AutonomousConsultationCoordinator {
       this.fail(run, claim, "CONSULTATION_PEER_REQUEST_INVALID", now);
       return true;
     }
+    const currentDelegation = this.effectiveDelegation(claim.envelope);
+    if (
+      run.delegation.mode !== "bounded" ||
+      currentDelegation.mode !== "bounded"
+    ) {
+      this.fail(run, claim, "CONSULTATION_DELEGATION_PROHIBITED", now);
+      return true;
+    }
     if (!run.nested_task_id) {
-      if (run.depth >= run.max_depth) {
+      const maxDepth = Math.min(
+        run.max_depth,
+        run.delegation.max_depth,
+        currentDelegation.max_depth,
+      );
+      if (run.depth >= maxDepth) {
         this.fail(run, claim, "CONSULTATION_DEPTH_LIMIT", now);
         return true;
       }
@@ -418,16 +460,17 @@ export class AutonomousConsultationCoordinator {
             evidence_mode: "pinned_git",
           },
           coordination_request: {
-            protocol_version: "1.0",
+            protocol_version: "1.1",
             intent: run.peer_request.intent,
             access_mode: "read_only",
+            delegation: { mode: "bounded", max_depth: maxDepth },
           },
           consultation_context: {
             protocol_version: "1.0",
             root_request_id: run.root_request_id,
             parent_request_id: run.request_message_id,
             depth: run.depth + 1,
-            max_depth: run.max_depth,
+            max_depth: maxDepth,
             ancestry_fingerprints: [
               ...run.ancestry_fingerprints,
               fingerprint,
@@ -484,10 +527,13 @@ export class AutonomousConsultationCoordinator {
     }
     if (
       nested.envelope.stream_id !== "agent-coordination" ||
+      !nested.envelope.payload.coordination_request ||
       reply.state === "quarantined" ||
       reply.envelope.origin_system !== nested.envelope.target_system ||
       reply.envelope.target_system !== this.systemId ||
       reply.envelope.stream_id !== "agent-coordination" ||
+      reply.envelope.payload.coordination_result?.protocol_version !==
+        nested.envelope.payload.coordination_request.protocol_version ||
       reply.envelope.conversation_id !==
         nested.envelope.conversation_id ||
       reply.envelope.correlation_id !== run.root_request_id ||
@@ -559,7 +605,7 @@ export class AutonomousConsultationCoordinator {
         body: run.final_answer,
         evidence: buildEvidenceReferences(run),
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: claim.envelope.payload.coordination_request!.protocol_version,
           request_message_id: run.request_message_id,
           outcome: "completed",
         },
@@ -612,7 +658,7 @@ export class AutonomousConsultationCoordinator {
           "The bounded consultation stopped at a configured safety limit or evidence boundary.",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: claim.envelope.payload.coordination_request!.protocol_version,
           request_message_id: run.request_message_id,
           outcome: "rejected",
         },
@@ -643,7 +689,7 @@ export class AutonomousConsultationCoordinator {
           "The bounded consultation stopped at a configured project or evidence boundary.",
         evidence: [],
         coordination_result: {
-          protocol_version: "1.0",
+          protocol_version: claim.envelope.payload.coordination_request!.protocol_version,
           request_message_id: claim.envelope.message_id,
           outcome: "rejected",
         },
@@ -668,6 +714,25 @@ export class AutonomousConsultationCoordinator {
 
   private operationTime(fallback: Date): Date {
     return this.clock?.() ?? fallback;
+  }
+
+  private effectiveDelegation(envelope: BridgeEnvelope): DelegationPolicy {
+    const request = envelope.payload.coordination_request;
+    if (
+      request?.protocol_version !== "1.1" ||
+      request.delegation.mode !== "bounded"
+    ) {
+      return { mode: "none" };
+    }
+    const maxDepth = Math.min(
+      this.policy.maxDepth,
+      request.delegation.max_depth,
+      envelope.payload.consultation_context?.max_depth ??
+        request.delegation.max_depth,
+    );
+    return maxDepth > 0
+      ? { mode: "bounded", max_depth: maxDepth }
+      : { mode: "none" };
   }
 }
 

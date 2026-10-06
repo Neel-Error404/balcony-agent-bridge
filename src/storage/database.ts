@@ -33,6 +33,7 @@ import {
   type AuthorizationRequestState,
 } from "../contracts/approval.js";
 import { normalizeErrorCode, safeErrorCode } from "../security/sanitize-error.js";
+import { PEER_CHECK_STREAM } from "../contracts/peer-check.js";
 
 export type OutboxState =
   | "pending"
@@ -247,15 +248,26 @@ export interface BridgeStatus {
 export class BridgeDatabase {
   private readonly database: Database.Database;
 
-  public constructor(databasePath: string) {
-    if (databasePath !== ":memory:") {
+  public constructor(databasePath: string, options: { readOnly?: boolean; requireExisting?: boolean } = {}) {
+    if (databasePath !== ":memory:" && !options.readOnly && !options.requireExisting) {
       fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     }
 
-    this.database = new Database(databasePath);
+    this.database = new Database(databasePath, {
+      readonly: options.readOnly ?? false,
+      fileMustExist: Boolean(options.readOnly || options.requireExisting),
+    });
     try {
       this.assertSupportedSchemaVersion();
       this.database.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+      if (options.readOnly) {
+        const schema = this.database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
+          .get() as { version: number | null };
+        if (schema.version !== CURRENT_SCHEMA_VERSION) {
+          throw new StateTransitionError("Read-only inspection requires the current database schema; run setup to upgrade explicitly.");
+        }
+        return;
+      }
       if (databasePath !== ":memory:") {
         this.ensureWalMode();
       }
@@ -330,6 +342,13 @@ export class BridgeDatabase {
       ...(row.claim_owner ? { claimOwner: row.claim_owner } : {}),
       ...(row.claim_until_utc ? { claimUntilUtc: row.claim_until_utc } : {}),
     };
+  }
+
+  public getInboxFirstReceivedAtUtc(messageId: string): string | undefined {
+    const row = this.database
+      .prepare("SELECT first_received_at_utc FROM inbox WHERE message_id = ?")
+      .get(messageId) as { first_received_at_utc: string } | undefined;
+    return row?.first_received_at_utc;
   }
 
   public getOutboxMessage(messageId: string): OutboxListItem | undefined {
@@ -794,10 +813,31 @@ export class BridgeDatabase {
       if (!resource?.enabled) {
         return { status: "denied" };
       }
-      if (this.isPeerAuthorizedForResource(peerSystemId.data, resourceId)) {
-        return { status: "authorized", basis: "persistent_grant" };
+      const requestIdentity = hashAuthorizationValue([
+        peerSystemId.data,
+        resourceId,
+        envelope.kind,
+        envelope.stream_id,
+        envelope.idempotency_key,
+      ]);
+      const requestFingerprint = hashAuthorizationValue([
+        requestIdentity,
+        row.payload_sha256,
+      ]);
+      const existing = this.getAuthorizationRequestRowByIdentity(requestIdentity);
+      const exactRequest = existing?.request_id === input.requestMessageId &&
+        existing.request_fingerprint === requestFingerprint;
+      if (
+        exactRequest &&
+        existing.state === "revoked" &&
+        existing.consumed_at_utc !== null
+      ) {
+        return { status: "denied", approvalRequestId: existing.request_id };
       }
-
+      const persistentGrant = this.isPeerAuthorizedForResource(
+        peerSystemId.data,
+        resourceId,
+      );
       const temporary = this.database
         .prepare(
           `SELECT request_id
@@ -812,6 +852,67 @@ export class BridgeDatabase {
         .get(peerSystemId.data, resourceId, nowUtc) as
         | { request_id: string }
         | undefined;
+      const requestExpired = envelope.expires_at_utc !== undefined &&
+        Date.parse(envelope.expires_at_utc) <= now.getTime();
+      if (requestExpired) {
+        const run = this.getConsultationRun(input.requestMessageId);
+        const existingConsultation = Boolean(
+          envelope.payload.dispatch?.evidence_mode === "pinned_git" &&
+          envelope.payload.coordination_request &&
+          run?.project === resourceId &&
+          run.conversation_id === envelope.conversation_id,
+        );
+        if (
+          existingConsultation &&
+          ((exactRequest && existing?.state === "consumed") ||
+            ((run?.state === "completed" || run?.state === "failed") &&
+              (persistentGrant || temporary !== undefined)))
+        ) {
+          // A persisted run does not confer authority: a grant or temporary
+          // approval must still be active, unless this exact request owns an
+          // unrevoked consumed reservation.
+          return {
+            status: "authorized",
+            basis: "same_request_recovery",
+            ...(exactRequest ? { approvalRequestId: existing.request_id } : {}),
+          };
+        }
+        if (exactRequest && existing.state === "consumed") {
+          const prior = this.getOutboxByIdempotency(
+            peerSystemId.data,
+            `read-only-result:${input.requestMessageId}`,
+          );
+          const reply = prior?.envelope;
+          if (
+            prior &&
+            prior.state !== "quarantined" &&
+            prior.state !== "expired" &&
+            reply?.kind === "task_result" &&
+            reply.origin_system === actorId &&
+            reply.target_system === peerSystemId.data &&
+            reply.causation_id === input.requestMessageId &&
+            reply.conversation_id === envelope.conversation_id &&
+            reply.stream_id === envelope.stream_id &&
+            (reply.payload.project === undefined ||
+              reply.payload.project === resourceId)
+          ) {
+            // A persisted result can be settled, but not executed again.
+            return {
+              status: "authorized",
+              basis: "same_request_recovery",
+              approvalRequestId: existing.request_id,
+            };
+          }
+        }
+        return {
+          status: "denied",
+          ...(exactRequest ? { approvalRequestId: existing.request_id } : {}),
+        };
+      }
+      if (persistentGrant) {
+        return { status: "authorized", basis: "persistent_grant" };
+      }
+
       if (temporary) {
         this.insertAuthorizationAudit({
           requestId: temporary.request_id,
@@ -829,18 +930,6 @@ export class BridgeDatabase {
         };
       }
 
-      const requestIdentity = hashAuthorizationValue([
-        peerSystemId.data,
-        resourceId,
-        envelope.kind,
-        envelope.stream_id,
-        envelope.idempotency_key,
-      ]);
-      const requestFingerprint = hashAuthorizationValue([
-        requestIdentity,
-        row.payload_sha256,
-      ]);
-      const existing = this.getAuthorizationRequestRowByIdentity(requestIdentity);
       if (existing && existing.request_id !== input.requestMessageId) {
         return {
           status: "duplicate",
@@ -862,13 +951,18 @@ export class BridgeDatabase {
               approvalRequestId: existing.request_id,
             };
           case "approved_once":
-            this.database
+            const consumed = this.database
               .prepare(
                 `UPDATE authorization_requests
                  SET state = 'consumed', consumed_at_utc = ?, updated_at_utc = ?
                  WHERE request_id = ? AND state = 'approved_once'`,
               )
               .run(nowUtc, nowUtc, existing.request_id);
+            if (consumed.changes !== 1) {
+              throw new StateTransitionError(
+                "Approve-once reservation changed before consumption",
+              );
+            }
             this.insertAuthorizationAudit({
               requestId: existing.request_id,
               event: "consumed",
@@ -884,21 +978,12 @@ export class BridgeDatabase {
               approvalRequestId: existing.request_id,
             };
           case "consumed":
-            return this.database
-              .prepare(
-                `SELECT 1 FROM consultation_runs
-                 WHERE request_message_id = ?`,
-              )
-              .get(existing.request_id)
-              ? {
-                  status: "authorized",
-                  basis: "same_request_recovery",
-                  approvalRequestId: existing.request_id,
-                }
-              : {
-                  status: "denied",
-                  approvalRequestId: existing.request_id,
-                };
+            // The consumed row is the durable exact-request reservation.
+            return {
+              status: "authorized",
+              basis: "same_request_recovery",
+              approvalRequestId: existing.request_id,
+            };
           case "approved_temporary":
             return existing.temporary_expires_at_utc &&
               existing.temporary_expires_at_utc > nowUtc
@@ -1056,9 +1141,13 @@ export class BridgeDatabase {
       if (row.state === "revoked") {
         return this.mapAuthorizationRequest(row);
       }
-      if (row.state !== "approved_once" && row.state !== "approved_temporary") {
+      if (
+        row.state !== "approved_once" &&
+        row.state !== "approved_temporary" &&
+        row.state !== "consumed"
+      ) {
         throw new StateTransitionError(
-          "Only an active approval can be revoked",
+          "Only an active approval or consumed reservation can be revoked",
         );
       }
       const result = this.database
@@ -1489,6 +1578,12 @@ export class BridgeDatabase {
     now = new Date(),
   ): ConsultationRun {
     const candidate = ConsultationRunSchema.parse(value);
+    const existing = this.getConsultationRun(candidate.request_message_id);
+    if (existing && !sameConsultationIdentity(existing, candidate)) {
+      throw new StateTransitionError(
+        "Consultation identity or delegation authority cannot change during recovery.",
+      );
+    }
     if (candidate.version !== expectedVersion) {
       throw new StateTransitionError(
         "Consultation run version does not match the expected version",
@@ -1850,7 +1945,7 @@ export class BridgeDatabase {
            SET state = 'expired', lease_owner = NULL, lease_until_utc = NULL
            WHERE state IN ('pending', 'leased')
              AND expires_at_utc IS NOT NULL
-             AND expires_at_utc <= ?`,
+             AND julianday(expires_at_utc) <= julianday(?)`,
         )
         .run(nowUtc);
 
@@ -2139,10 +2234,33 @@ export class BridgeDatabase {
       consumerId,
       limit,
       leaseSeconds,
-      kindFilter,
-      kinds ?? [],
+      `AND stream_id <> ? ${kindFilter}`,
+      [PEER_CHECK_STREAM, ...(kinds ?? [])],
       now,
     );
+  }
+
+  public claimPeerChallenges(consumerId: string, now = new Date()): ClaimedInboxMessage[] {
+    return this.claimInboxWhere(
+      consumerId, 10, 30,
+      "AND stream_id = ? AND kind = 'heartbeat' AND authenticated_ingress = 1",
+      [PEER_CHECK_STREAM], now, true,
+    );
+  }
+
+  public *findPeerAcknowledgements(challenge: BridgeEnvelope): IterableIterator<BridgeEnvelope> {
+    // Stream indexed candidates instead of truncating before protocol
+    // validation: invalid early responses must not hide a later valid one.
+    // Memory is bounded; admission/storage quotas are a separate boundary.
+    const rows = this.database.prepare(
+      `SELECT envelope_json FROM inbox
+       WHERE causation_id = ? AND stream_id = ? AND kind = 'acknowledgement'
+         AND authenticated_ingress = 1 AND origin_system = ?
+         AND json_extract(envelope_json, '$.target_system') = ?
+         AND json_extract(envelope_json, '$.conversation_id') = ?`,
+    ).iterate(challenge.message_id, PEER_CHECK_STREAM, challenge.target_system,
+      challenge.origin_system, challenge.conversation_id) as IterableIterator<{ envelope_json: string }>;
+    for (const row of rows) yield parseEnvelope(JSON.parse(row.envelope_json));
   }
 
   public claimReadOnlyDispatchInbox(
@@ -2207,7 +2325,7 @@ export class BridgeDatabase {
         ? ""
         : `AND (
                json_extract(envelope_json, '$.expires_at_utc') IS NULL
-               OR json_extract(envelope_json, '$.expires_at_utc') > ?
+               OR julianday(json_extract(envelope_json, '$.expires_at_utc')) > julianday(?)
              )`;
       const rows = this.database
         .prepare(
@@ -3168,7 +3286,7 @@ export class BridgeDatabase {
       leaseSeconds,
       `AND kind = 'task_request'
        AND stream_id = 'agent-coordination'
-       AND json_extract(envelope_json, '$.payload.coordination_request.protocol_version') = '1.0'
+       AND json_extract(envelope_json, '$.payload.coordination_request.protocol_version') IN ('1.0', '1.1')
        AND json_extract(envelope_json, '$.payload.dispatch.executor') = 'codex_cli'
        AND json_extract(envelope_json, '$.payload.dispatch.access') = 'read_only'
        AND json_extract(envelope_json, '$.payload.dispatch.evidence_mode') = 'pinned_git'
@@ -3212,7 +3330,8 @@ function sameConsultationIdentity(
     left.conversation_id === right.conversation_id &&
     left.root_request_id === right.root_request_id &&
     left.project === right.project &&
-    left.depth === right.depth
+    left.depth === right.depth &&
+    JSON.stringify(left.delegation) === JSON.stringify(right.delegation)
   );
 }
 

@@ -96,7 +96,7 @@ describe("read-only dispatcher crash recovery", () => {
       ),
     ).toBe(1);
 
-    expect(executor.inputs).toHaveLength(1);
+    expect(executor.inputs).toHaveLength(0);
     expect(database.getStatus().outbox.pending).toBe(1);
     expect(database.getStatus().inbox.processed).toBe(1);
     const authoritative = database.leaseOutbox(

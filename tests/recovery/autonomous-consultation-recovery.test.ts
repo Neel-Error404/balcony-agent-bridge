@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BridgeConfig } from "../../src/config.js";
@@ -104,6 +105,82 @@ describe("autonomous consultation recovery", () => {
     expect(database.getInboxMessage(request.message_id)?.state).toBe(
       "processed",
     );
+  });
+
+  it("rejects a historical waiting-peer run missing delegation after restart", async () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), "balcony-consultation-legacy-restart-"),
+    );
+    directories.push(root);
+    const projectPath = path.join(root, "project");
+    const neutralPath = path.join(root, "neutral");
+    const databasePath = path.join(root, "bridge.sqlite3");
+    fs.mkdirSync(projectPath);
+    fs.mkdirSync(neutralPath);
+    const registry = createRegistry(root, projectPath);
+    const request = incomingRequest();
+    let database = openDatabase(databasePath);
+    database.registerResource("balcony-agent-bridge");
+    database.grantPeerResource("SYS-A", "balcony-agent-bridge");
+    database.persistIncoming(request, 1, now(0), true);
+    await createCoordinator(
+      database,
+      databasePath,
+      registry,
+      neutralPath,
+      new RestartExecutor([
+        result({
+          outcome: "needs_information",
+          reason: "README required.",
+          requested_evidence: ["README.md"],
+          evidence_paths: [],
+        }),
+      ]),
+    ).runOnce(now(1));
+    const run = database.getConsultationRun(request.message_id)!;
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
+    const { delegation: _missingHistoricalPolicy, ...legacyRun } = run;
+    const sqlite = new Database(databasePath);
+    try {
+      sqlite.prepare(
+        "UPDATE consultation_runs SET state = ?, run_json = ? WHERE request_message_id = ?",
+      ).run(
+        "waiting_peer",
+        JSON.stringify({
+          ...legacyRun,
+          state: "waiting_peer",
+          requested_evidence: undefined,
+          peer_request: {
+            subject: "Inspect peer runtime",
+            request: "Return peer runtime status.",
+            intent: "inspect",
+          },
+        }),
+        request.message_id,
+      );
+    } finally {
+      sqlite.close();
+    }
+    database = openDatabase(databasePath);
+    expect(database.getConsultationRun(request.message_id)).toMatchObject({
+      state: "waiting_peer",
+      delegation: { mode: "none" },
+    });
+    const resumedExecutor = new RestartExecutor([]);
+    expect(await createCoordinator(
+      database,
+      databasePath,
+      registry,
+      neutralPath,
+      resumedExecutor,
+    ).runOnce(now(2))).toBe(1);
+    expect(database.getConsultationRun(request.message_id)).toMatchObject({
+      state: "failed",
+      error_code: "CONSULTATION_DELEGATION_PROHIBITED",
+    });
+    expect(database.getStatus().outbox.pending).toBe(1);
+    expect(resumedExecutor.inputs).toHaveLength(0);
   });
 
   function openDatabase(databasePath: string): BridgeDatabase {

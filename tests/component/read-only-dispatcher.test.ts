@@ -19,6 +19,7 @@ import type {
   CodexExecutor,
 } from "../../src/dispatcher/codex-executor.js";
 import { ReadOnlyDispatcher } from "../../src/dispatcher/dispatcher.js";
+import { CodexExecutionError } from "../../src/errors.js";
 import { ProjectRegistry } from "../../src/dispatcher/project-registry.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
 
@@ -137,6 +138,39 @@ describe("ReadOnlyDispatcher", () => {
     expect(database.getStatus().outbox.pending).toBe(0);
   });
 
+  it("does not settle a task when executor termination is unverified", async () => {
+    executor.error = new CodexExecutionError(
+      "CODEX_TERMINATION_FAILED", "Test worker did not close.",
+    );
+    database.persistIncoming(incomingEnvelope("unverified-stop", true), 1, new Date(), true);
+    await expect(dispatcher.runOnce()).rejects.toMatchObject({
+      code: "CODEX_TERMINATION_FAILED",
+    });
+    expect(database.getStatus().inbox.claimed).toBe(1);
+    expect(database.getStatus().inbox.rejected).toBe(0);
+    expect(database.getStatus().outbox.pending).toBe(0);
+  });
+
+  it("does not hide unverified termination behind the claim-renewal error that cancelled execution", async () => {
+    vi.spyOn(database, "renewClaim").mockImplementation(() => {
+      throw new Error("Synthetic renewal failure.");
+    });
+    const unsafe = new ReadOnlyDispatcher(
+      dispatcherConfig(path.join(temporaryDirectory, "projects.json")),
+      database, registry, {
+        execute: input => new Promise((_resolve, reject) => {
+          input.abortSignal!.addEventListener("abort", () => reject(
+            new CodexExecutionError("CODEX_TERMINATION_FAILED", "Test process still live."),
+          ), { once: true });
+        }),
+      }, { claimLeaseSeconds: 60, claimRenewalIntervalMs: 1 },
+    );
+    database.persistIncoming(incomingEnvelope("renewal-unverified-stop", true), 1, new Date(), true);
+    await expect(unsafe.runOnce()).rejects.toMatchObject({ code: "CODEX_TERMINATION_FAILED" });
+    expect(database.getStatus().inbox.claimed).toBe(1);
+    expect(database.getStatus().outbox.pending).toBe(0);
+  });
+
   it("renews the claim while a long-running worker is active", async () => {
     const renewal = vi.spyOn(database, "renewClaim");
     const slowDispatcher = new ReadOnlyDispatcher(
@@ -249,6 +283,30 @@ describe("ReadOnlyDispatcher", () => {
     );
     expect(database.getStatus().inbox.claimed).toBe(1);
     expect(database.getStatus().inbox.rejected).toBe(0);
+    expect(database.getStatus().outbox.pending).toBe(0);
+  });
+
+  it("never publishes success from an executor that resolves after runtime cancellation", async () => {
+    const controller = new AbortController();
+    const request = incomingEnvelope("parent-loss-executor-race", true);
+    database.persistIncoming(request, 1, new Date(), true);
+    let complete = (): void => undefined;
+    const raced = new ReadOnlyDispatcher(
+      dispatcherConfig(path.join(temporaryDirectory, "projects.json")),
+      database,
+      registry,
+      {
+        execute: async () => new Promise<CodexExecutionResult>(resolve => {
+          complete = () => resolve({ output: "Must not become authoritative after abort." });
+        }),
+      },
+    );
+    const run = raced.runOnce(new Date(), controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    complete();
+    await expect(run).rejects.toMatchObject({ code: "CODEX_ABORTED" });
+    expect(database.getStatus().inbox.claimed).toBe(1);
     expect(database.getStatus().outbox.pending).toBe(0);
   });
 });

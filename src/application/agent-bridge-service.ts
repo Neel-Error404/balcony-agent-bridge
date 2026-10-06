@@ -9,7 +9,9 @@ import {
 } from "../contracts/envelope.js";
 import {
   COORDINATION_PROTOCOL_VERSION,
+  DelegationPolicySchema,
   type CoordinationIntent,
+  type DelegationPolicy,
 } from "../contracts/coordination.js";
 import type { BridgeConfig } from "../config.js";
 import {
@@ -54,6 +56,7 @@ export interface AskAgentInput {
   conversationId?: string;
   expiresAtUtc?: string;
   evidenceMode?: "pinned_git";
+  delegation?: DelegationPolicy;
 }
 
 export interface ContinueAgentInput {
@@ -119,6 +122,7 @@ export class AgentBridgeService {
 
   public askAgent(input: AskAgentInput) {
     const targetNodeId = this.requireAuthorizedRemoteNode(input.targetNodeId);
+    const delegation = DelegationPolicySchema.parse(input.delegation ?? { mode: "none" });
     const existingRequest = this.database.getOutboxByIdempotency(
       targetNodeId,
       input.idempotencyKey,
@@ -161,6 +165,7 @@ export class AgentBridgeService {
           protocol_version: COORDINATION_PROTOCOL_VERSION,
           intent: input.intent,
           access_mode: "read_only",
+          delegation,
         },
       },
       sequenceNumber: 0,
@@ -217,6 +222,16 @@ export class AgentBridgeService {
         "The previous result is not linked to a local coordination request",
       );
     }
+    if (
+      resultMetadata.protocol_version !==
+      priorRequest.envelope.payload.coordination_request.protocol_version
+    ) {
+      throw new StateTransitionError("Coordination result protocol version does not match its request.");
+    }
+    const originalContract = priorRequest.envelope.payload.coordination_request;
+    const delegation = originalContract.protocol_version === "1.1"
+      ? originalContract.delegation
+      : { mode: "none" as const };
     const thread = this.database.listConversation(
       previous.envelope.conversation_id,
       100,
@@ -226,6 +241,19 @@ export class AgentBridgeService {
       previous.envelope.origin_system,
       input.idempotencyKey,
     );
+    if (!existingFollowUp) {
+      const authoritative = this.getAgentResult(priorRequest.envelope.message_id);
+      if (authoritative.status !== "completed") {
+        throw new StateTransitionError(
+          "The previous result is not a timely completed peer coordination result",
+        );
+      }
+      if (authoritative.result_message_id !== previous.envelope.message_id) {
+        throw new StateTransitionError(
+          "The previous result is not the authoritative timely peer coordination result",
+        );
+      }
+    }
     const latest = thread.at(-1)?.envelope;
     if (
       !existingFollowUp &&
@@ -284,6 +312,7 @@ export class AgentBridgeService {
           protocol_version: COORDINATION_PROTOCOL_VERSION,
           intent: input.intent,
           access_mode: "read_only",
+          delegation,
         },
       },
       ...(input.expiresAtUtc ? { expiresAtUtc: input.expiresAtUtc } : {}),
@@ -358,6 +387,30 @@ export class AgentBridgeService {
       this.config.systemId,
       request.envelope.conversation_id,
     );
+    const deadline = request.envelope.expires_at_utc
+      ? Date.parse(request.envelope.expires_at_utc)
+      : undefined;
+    const arrivedAt = reply
+      ? this.database.getInboxFirstReceivedAtUtc(reply.envelope.message_id)
+      : undefined;
+    if (
+      deadline !== undefined &&
+      (reply
+        ? arrivedAt === undefined || !Number.isFinite(Date.parse(arrivedAt)) ||
+          Date.parse(arrivedAt) >= deadline
+        : Date.now() >= deadline)
+    ) {
+      return {
+        task_id: taskId,
+        conversation_id: request.envelope.conversation_id,
+        status: "failed" as const,
+        delivery_state: request.state,
+        failure_code: "TASK_DEADLINE_EXCEEDED" as const,
+        deadline_at_utc: new Date(deadline).toISOString(),
+        remote_cancellation_confirmed: false,
+        ...(reply ? { late_result_message_id: reply.envelope.message_id } : {}),
+      };
+    }
     if (reply) {
       if (
         reply.envelope.origin_system !== request.envelope.target_system ||
@@ -369,6 +422,12 @@ export class AgentBridgeService {
         );
       }
       const metadata = reply.envelope.payload.coordination_result;
+      if (
+        metadata?.protocol_version !==
+        request.envelope.payload.coordination_request.protocol_version
+      ) {
+        throw new StateTransitionError("Coordination result protocol version does not match its request.");
+      }
       const outcome =
         reply.state === "quarantined"
           ? "failed"

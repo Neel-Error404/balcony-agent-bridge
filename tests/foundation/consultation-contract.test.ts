@@ -4,8 +4,52 @@ import {
   ConsultationContextSchema,
   consultationRequestFingerprint,
 } from "../../src/contracts/consultation.js";
+import { CoordinationRequestSchema } from "../../src/contracts/coordination.js";
 import { ChildTurnResultSchema } from "../../src/contracts/evidence.js";
 import { createEnvelope } from "../../src/contracts/envelope.js";
+
+it("requires explicit authority on 1.1 requests and rejects legacy policy smuggling", () => {
+  expect(() => CoordinationRequestSchema.parse({
+    protocol_version: "1.1", intent: "inspect", access_mode: "read_only",
+  })).toThrow();
+  expect(() => CoordinationRequestSchema.parse({
+    protocol_version: "1.0", intent: "inspect", access_mode: "read_only",
+    delegation: { mode: "bounded", max_depth: 2 },
+  })).toThrow();
+  expect(CoordinationRequestSchema.parse({
+    protocol_version: "1.1", intent: "inspect", access_mode: "read_only",
+    delegation: { mode: "none" },
+  })).toHaveProperty("delegation.mode", "none");
+});
+
+it("represents zero delegation depth and denies an inconsistent 1.1 nested context", () => {
+  expect(ConsultationContextSchema.parse({
+    protocol_version: "1.0",
+    root_request_id: "11111111-1111-4111-8111-111111111111",
+    depth: 0,
+    max_depth: 0,
+    ancestry_fingerprints: [],
+  })).toHaveProperty("max_depth", 0);
+  expect(() => createEnvelope({
+    idempotencyKey: "no-delegation-context",
+    originSystem: "SYS-A", targetSystem: "SYS-B", kind: "task_request",
+    streamId: "agent-coordination",
+    correlationId: "11111111-1111-4111-8111-111111111111",
+    payload: {
+      subject: "No delegation", body: "Inspect", evidence: [],
+      dispatch: { executor: "codex_cli", access: "read_only" },
+      coordination_request: {
+        protocol_version: "1.1", intent: "inspect", access_mode: "read_only",
+        delegation: { mode: "none" },
+      },
+      consultation_context: {
+        protocol_version: "1.0",
+        root_request_id: "11111111-1111-4111-8111-111111111111",
+        depth: 0, max_depth: 2, ancestry_fingerprints: [],
+      },
+    },
+  })).toThrow(/delegation/);
+});
 
 describe("autonomous consultation contracts", () => {
   it("accepts bounded depth and ancestry on protocol 1.0 envelopes", () => {

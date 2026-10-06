@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import { DelegationPolicySchema } from "./coordination.js";
 
 import {
   EvidenceBundleSchema,
@@ -18,7 +19,7 @@ export const ConsultationContextSchema = z
     root_request_id: z.string().uuid(),
     parent_request_id: z.string().uuid().optional(),
     depth: z.number().int().min(0).max(4),
-    max_depth: z.number().int().min(1).max(4),
+    max_depth: z.number().int().min(0).max(4),
     ancestry_fingerprints: z.array(FingerprintSchema).max(8),
   })
   .strict()
@@ -68,7 +69,8 @@ export const ConsultationRunSchema = z
     round_count: z.number().int().min(0).max(16),
     depth: z.number().int().min(0).max(4),
     max_rounds: z.number().int().min(1).max(16),
-    max_depth: z.number().int().min(1).max(4),
+    max_depth: z.number().int().min(0).max(4),
+    delegation: DelegationPolicySchema.default({ mode: "none" }),
     ancestry_fingerprints: z.array(FingerprintSchema).min(1).max(8),
     deadline_at_utc: z.string().datetime({ offset: true }),
     evidence: EvidenceBundleSchema,
