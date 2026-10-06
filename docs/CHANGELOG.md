@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — `0.3.1-core.2`
+
+October 6, 2026, `[SYS-A]`. Separate dependency-security revision over reviewed
+core commit `cef068a...`; no merge, package publication or deployment.
+
+- Pin MCP SDK `1.32.1` to address `GHSA-6qxp-vccf-f47h`.
+- Add synthetic issuer-routing negative and trusted-positive regressions;
+  dependency tests do not introduce an OAuth client into the product.
+- Keep the previous candidate's source and artifact identity distinct.
+- Prior zero-production-audit snapshots were superseded by the new advisory;
+  audit results must be refreshed for each candidate.
+
+Source: [security revision evidence](verification/SYS-A-MCP-SECURITY-2026-10-06.md).
+
 ## Unreleased — `0.3.1-core.1`
 
 October 6, 2026, `[SYS-A]`. Local core candidate; not a public npm release,

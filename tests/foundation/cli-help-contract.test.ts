@@ -22,7 +22,7 @@ describe("CLI discovery contract", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout.trim()).toBe("0.3.1-core.1");
+    expect(result.stdout.trim()).toBe("0.3.1-core.2");
   }, 15_000);
 
   it.each([

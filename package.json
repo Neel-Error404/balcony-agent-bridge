@@ -1,6 +1,6 @@
 {
   "name": "balcony-agent-bridge",
-  "version": "0.3.1-core.1",
+  "version": "0.3.1-core.2",
   "license": "Apache-2.0",
   "description": "Durable MCP bridge for secret-safe coordination between coding agents",
   "repository": {
@@ -70,7 +70,7 @@
     "@azure/core-auth": "1.11.0",
     "@azure/identity": "4.13.1",
     "@azure/service-bus": "7.9.5",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "better-sqlite3": "13.0.3",
     "zod": "4.4.3",
     "@openai/codex": "0.150.1"
