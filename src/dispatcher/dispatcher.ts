@@ -7,6 +7,7 @@ import type { ReadOnlyDispatcherConfig } from "../config.js";
 import type { BridgeEnvelope } from "../contracts/envelope.js";
 import {
   CodexExecutionError,
+  BridgeError,
   DispatchResultUnavailableError,
   DispatchRejectedError,
   StateTransitionError,
@@ -222,6 +223,7 @@ export class ReadOnlyDispatcher {
         );
         result = await this.executor.execute({
           projectPath: project.path,
+          requestMessageId: claim.envelope.message_id,
           prompt: buildReadOnlyPrompt(
             claim.envelope,
             task.prompt,
@@ -294,7 +296,8 @@ export class ReadOnlyDispatcher {
       }
       if (
         error instanceof DispatchRejectedError ||
-        error instanceof CodexExecutionError
+        error instanceof CodexExecutionError ||
+        (error instanceof BridgeError && error.code === "PILOT_BUDGET_EXHAUSTED")
       ) {
         this.rejectClaim(claim, error);
         return;
@@ -478,6 +481,8 @@ function belongsToRoute(
 
 function failureMessage(code: string): string {
   switch (code) {
+    case "PILOT_BUDGET_EXHAUSTED":
+      return "The receiving system's approved pilot execution allowance is exhausted; no worker was launched.";
     case "DISPATCH_REJECTED":
       return "The receiving system rejected this task because it is not within the configured read-only project policy.";
     case "CODEX_TIMED_OUT":

@@ -23,6 +23,10 @@ import { ReadOnlyDispatcher } from "./dispatcher.js";
 import { ProjectRegistry } from "./project-registry.js";
 import { serviceParentSupervisionEnabled, superviseParent } from "../runtime/parent-supervision.js";
 import { assertDispatcherTerminationVerified, runDispatcher, type ForegroundDispatcher } from "./runtime.js";
+import {
+  createPilotExecution, readPilotConfiguration, validatePilotRegistry,
+} from "./pilot-executor.js";
+import type { CodexExecutor } from "./codex-executor.js";
 
 try {
   const { values, positionals } = parseArgs({
@@ -58,22 +62,34 @@ try {
       ? assertConfigMatchesProcessIdentity(loadConfigFile(values.config))
       : loadConfig();
     const config = loadReadOnlyDispatcherConfig(process.env, bridgeConfig);
+    if (config.pilotConfigPath && config.mode !== "consultation") {
+      throw new DispatchConfigurationError("Pilot execution requires pinned-evidence consultation mode.");
+    }
+    const pilot = config.pilotConfigPath
+      ? readPilotConfiguration(config.pilotConfigPath, config.systemId)
+      : undefined;
+    if (pilot) validatePilotRegistry(config.projectsPath);
     const database = new BridgeDatabase(config.databasePath);
     // Must run before supervision callbacks or healthy startup can overwrite
     // a durable unverified-executor failure left by the prior service process.
     assertDispatcherTerminationVerified(database);
     const projects = ProjectRegistry.load(config.projectsPath);
-    const executor = new LocalCodexExecutor(
+    const localExecutor = new LocalCodexExecutor(
       config.codexExecutable,
       config.codexHome,
       config.codexExecutableSha256,
       config.codexCodeModeHostExecutable,
       config.codexCodeModeHostSha256,
       config.trustedPath,
+      process.env,
+      pilot ? { model: pilot.model, combinedOutputLimit: true } : {},
     );
+    const execution = createPilotExecution(config.pilotConfigPath, config.systemId, config.codexHome, localExecutor);
+    const executor = execution.executor;
     if (values["validate-config"]) {
       process.stdout.write('{"ok":true,"runtime":"dispatcher"}\n');
       database.close();
+      execution.close();
     } else {
       const dispatcher: ForegroundDispatcher =
         config.mode === "consultation"
@@ -83,6 +99,7 @@ try {
               database,
               projects,
               executor,
+              pilot,
             )
           : new ReadOnlyDispatcher(
               config,
@@ -114,6 +131,7 @@ try {
       } finally {
         stopSupervision();
         database.close();
+        execution.close();
       }
     }
   }
@@ -129,7 +147,8 @@ function createConsultationDispatcher(
   bridgeConfig: ReturnType<typeof loadConfig>,
   database: BridgeDatabase,
   projects: ProjectRegistry,
-  executor: LocalCodexExecutor,
+  executor: CodexExecutor,
+  pilot?: ReturnType<typeof readPilotConfiguration>,
 ): AutonomousConsultationCoordinator {
   if (
     !config.consultationWorkingDirectory ||
@@ -170,11 +189,11 @@ function createConsultationDispatcher(
     evidenceProvider,
     config.consultationWorkingDirectory,
     {
-      maxRounds: 4,
-      maxDepth: 2,
-      runTimeoutSeconds: 900,
+      maxRounds: pilot?.maximum_rounds ?? 4,
+      maxDepth: pilot?.maximum_depth ?? 2,
+      runTimeoutSeconds: pilot?.root_timeout_seconds ?? 900,
       claimLeaseSeconds: 720,
-      maxOutputBytes: config.maxOutputBytes,
+      maxOutputBytes: pilot?.maximum_output_bytes ?? config.maxOutputBytes,
     },
     () => new Date(),
   );

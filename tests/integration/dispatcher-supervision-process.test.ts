@@ -80,6 +80,28 @@ it("the actual dispatcher entrypoint refuses a retained unverified executor fail
   }
 }, 15_000);
 
+it("the actual dispatcher refuses pilot configuration in unrestricted legacy mode", () => {
+  const pilot = path.join(root, "pilot.json");
+  fs.writeFileSync(pilot, JSON.stringify({
+    schema_version: "river-pilot.v1", run_id: "20f4ef56-f06d-4391-ac3a-46c6b06af514",
+    system_id: "SYS-A", resource_id: "balcony-agent-bridge", model: "approved-test-model",
+    ledger_path: path.join(root, "launches.sqlite3"),
+    billing_mode: "subscription_only", billing_verified_until_utc: "2026-10-08T00:00:00Z",
+    maximum_launches: 6, execution_timeout_seconds: 120, root_timeout_seconds: 300,
+    maximum_rounds: 2, maximum_depth: 1, final_answer_characters: 4000, maximum_output_bytes: 48000,
+  }));
+  const result = spawnSync(process.execPath, [
+    "--import", "tsx", path.join(repository, "src/dispatcher/index.ts"), "--validate-config",
+  ], {
+    cwd: repository, env: { ...environment, BALCONY_DISPATCHER_PILOT_CONFIG_PATH: pilot },
+    encoding: "utf8", windowsHide: true, timeout: 10_000,
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("DISPATCH_CONFIGURATION_ERROR");
+}, 15_000);
+
 it("the actual idle dispatcher stops when its test-owned supervising parent disappears", async () => {
   const parentFile = path.join(root, "parent.mjs");
   const childRecord = path.join(root, "child.json");

@@ -19,7 +19,7 @@ import type {
   CodexExecutor,
 } from "../../src/dispatcher/codex-executor.js";
 import { ReadOnlyDispatcher } from "../../src/dispatcher/dispatcher.js";
-import { CodexExecutionError } from "../../src/errors.js";
+import { BridgeError, CodexExecutionError } from "../../src/errors.js";
 import { ProjectRegistry } from "../../src/dispatcher/project-registry.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
 
@@ -124,6 +124,15 @@ describe("ReadOnlyDispatcher", () => {
   it("does nothing when no dispatchable work exists", async () => {
     expect(await dispatcher.runOnce()).toBe(0);
     expect(executor.inputs).toHaveLength(0);
+  });
+
+  it("returns a bounded budget failure without claiming a worker success", async () => {
+    executor.error = new BridgeError("PILOT_BUDGET_EXHAUSTED", "six launches consumed");
+    database.persistIncoming(incomingEnvelope("pilot-budget", true), 1, new Date(), true);
+    expect(await dispatcher.runOnce()).toBe(1);
+    expect(database.getStatus().inbox.rejected).toBe(1);
+    const reply = database.leaseOutbox("test", 1, 60)[0]!;
+    expect(reply.envelope.payload.body).toContain("pilot");
   });
 
   it("leaves unexpected local failures recoverable instead of rejecting the task", async () => {

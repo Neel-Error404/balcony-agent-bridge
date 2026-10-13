@@ -74,6 +74,45 @@ it("fails within the termination bound when cancellation never produces process 
   expect(outcome).toMatchObject({ code: "CODEX_TERMINATION_FAILED" });
 });
 
+it("pins an explicitly approved pilot model without loading user provider defaults", async () => {
+  const executable = path.join(root, "codex.exe");
+  const host = path.join(root, "codex-code-mode-host.exe");
+  const hash = (file: string): string =>
+    createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const pinned = new LocalCodexExecutor(
+    executable, root, hash(executable), host, hash(host), "", {},
+    { model: "approved-test-model" },
+  );
+  const run = pinned.execute({
+    projectPath: root, prompt: "fixture", timeoutSeconds: 30, maxOutputBytes: 1000,
+  });
+  const args = processBoundary.spawn.mock.calls[0]![1] as string[];
+  expect(args).toEqual(expect.arrayContaining(["--model", "approved-test-model", "--ignore-user-config"]));
+  child.stdout.write("fixture answer");
+  child.emit("close", 0, null);
+  await expect(run).resolves.toEqual({ output: "fixture answer" });
+});
+
+it("enforces the pilot's total captured-output cap across stdout and stderr", async () => {
+  const executable = path.join(root, "codex.exe");
+  const host = path.join(root, "codex-code-mode-host.exe");
+  const hash = (file: string): string =>
+    createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const pinned = new LocalCodexExecutor(
+    executable, root, hash(executable), host, hash(host), "", {},
+    { model: "approved-test-model", combinedOutputLimit: true },
+  );
+  const run = pinned.execute({
+    projectPath: root, prompt: "fixture", timeoutSeconds: 30, maxOutputBytes: 48000,
+  });
+  const rejected = expect(run).rejects.toMatchObject({ code: "CODEX_OUTPUT_INVALID" });
+  child.stdout.write(Buffer.alloc(47000, "a"));
+  child.stderr.write(Buffer.alloc(1001, "b"));
+  child.emit("close", 0, null);
+  await rejected;
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("keeps verified cancellation classification when the process closes before the deadline", async () => {
   child.kill.mockReturnValue(true);
   const controller = new AbortController();

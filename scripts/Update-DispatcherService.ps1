@@ -1,10 +1,10 @@
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "Legacy")]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidatePattern("^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$")]
     [string] $SystemId,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidateCount(1, 32)]
     [string[]] $AuthorizedNodeIds,
 
@@ -12,35 +12,35 @@ param(
     [ValidatePattern("^[a-f0-9]{40}$")]
     [string] $ApprovedRevision,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [string] $ProjectRegistryPath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [string] $CodexExecutable,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidatePattern("^[a-f0-9]{64}$")]
     [string] $CodexExecutableSha256,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [string] $CodexCodeModeHostExecutable,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidatePattern("^[a-f0-9]{64}$")]
     [string] $CodexCodeModeHostExecutableSha256,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [string] $GitExecutable,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidatePattern("^[a-f0-9]{64}$")]
     [string] $GitExecutableSha256,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [ValidateSet("consultation")]
     [string] $DispatcherMode,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Legacy")]
     [datetimeoffset] $NotBeforeUtc,
 
     [string] $RepositoryRoot = (
@@ -51,6 +51,7 @@ param(
         (Get-Command node -ErrorAction Stop).Source
     ),
 
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
     [string] $InstallRoot = (
         Join-Path $env:ProgramData "Balcony\AgentDispatcher"
     ),
@@ -78,10 +79,55 @@ param(
     [int] $ServiceStartMaxAttempts = 3,
 
     [ValidateRange(0, 10000)]
-    [int] $ServiceRetryDelayMs = 1000
+    [int] $ServiceRetryDelayMs = 1000,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [ValidateSet("Validate", "Stage", "Activate", "Rollback")]
+    [string] $Operation,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [ValidateSet("BalconyAgentDispatcher")]
+    [string] $ServiceId,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [ValidatePattern('^(?:SYS-[AB]|[a-z][a-z0-9-]{0,49})$')]
+    [string] $NodeId,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [string] $ReleaseRoot,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [ValidatePattern('^[a-f0-9]{64}$')]
+    [string] $ApprovedManifestSha256,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [ValidatePattern('^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')]
+    [string] $DeploymentRunId,
+
+    [Parameter(Mandatory, ParameterSetName = "Paired")]
+    [string] $DesiredServiceXmlPath,
+
+    [string] $ReadinessProofPath,
+    [string] $PeerStageStatePath,
+    [string] $RestoreReadinessProofPath
 )
 
 $ErrorActionPreference = "Stop"
+if ($PSCmdlet.ParameterSetName -eq "Paired") {
+    Import-Module -Force (Join-Path $PSScriptRoot "BridgeRuntimeDeployment.psm1")
+    Invoke-BridgeRuntimeDeployment -Operation $Operation -ServiceId $ServiceId `
+        -NodeId $NodeId -InstallRoot $InstallRoot -ReleaseRoot $ReleaseRoot `
+        -ApprovedRevision $ApprovedRevision `
+        -ApprovedManifestSha256 $ApprovedManifestSha256 `
+        -DeploymentRunId $DeploymentRunId `
+        -DesiredServiceXmlPath $DesiredServiceXmlPath `
+        -ReadinessProofPath $ReadinessProofPath `
+        -PeerStageStatePath $PeerStageStatePath `
+        -RestoreReadinessProofPath $RestoreReadinessProofPath `
+        -StopTimeoutSeconds $ServiceStopTimeoutSeconds `
+        -StartTimeoutSeconds $ServiceStartTimeoutSeconds -WhatIf:$WhatIfPreference
+    return
+}
 $serviceName = "BalconyAgentDispatcher"
 $serviceAccount = "NT AUTHORITY\LocalService"
 $serviceSidAccount = "NT SERVICE\$serviceName"

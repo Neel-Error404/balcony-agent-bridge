@@ -27,6 +27,7 @@ import type { CodexExecutor } from "../dispatcher/codex-executor.js";
 import type { ProjectRegistry } from "../dispatcher/project-registry.js";
 import {
   CodexExecutionError,
+  BridgeError,
   DispatchRejectedError,
 } from "../errors.js";
 import {
@@ -192,6 +193,7 @@ export class AutonomousConsultationCoordinator {
       if (
         error instanceof EvidencePolicyError ||
         error instanceof DispatchRejectedError ||
+        (error instanceof BridgeError && error.code === "PILOT_BUDGET_EXHAUSTED") ||
         (error instanceof CodexExecutionError &&
           error.code !== "CODEX_ABORTED" &&
           error.code !== "CODEX_TERMINATION_FAILED")
@@ -299,6 +301,7 @@ export class AutonomousConsultationCoordinator {
     );
     const result = await this.executor.execute({
       projectPath: this.workingDirectory,
+      requestMessageId: claim.envelope.message_id,
       executionBoundary: "evidence_only",
       prompt: buildEvidenceOnlyChildPrompt({
         subject: claim.envelope.payload.subject,
@@ -318,6 +321,10 @@ export class AutonomousConsultationCoordinator {
       );
     }
     const completedAt = this.operationTime(now);
+    if (completedAt.getTime() >= Date.parse(run.deadline_at_utc)) {
+      this.fail(run, claim, "CONSULTATION_TIMED_OUT", completedAt);
+      return;
+    }
     const child = parseEvidenceOnlyChildResult(
       result.output,
       run.evidence,

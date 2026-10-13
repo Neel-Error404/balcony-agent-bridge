@@ -1,6 +1,6 @@
 {
   "name": "balcony-agent-bridge",
-  "version": "0.3.1-core.2",
+  "version": "0.3.1-pilot.1",
   "license": "Apache-2.0",
   "description": "Durable MCP bridge for secret-safe coordination between coding agents",
   "repository": {
@@ -55,6 +55,9 @@
     "test:workflow": "vitest run tests/workflow",
     "test:recovery": "vitest run tests/recovery",
     "test:security": "vitest run tests/security",
+    "test:tooling": "node --test tests/tooling/runtime-bundle.node.mjs",
+    "runtime:bundle": "node scripts/runtime-bundle.mjs",
+    "pilot:ledger": "node dist/dispatcher/pilot-cli.js",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "check:secrets": "node scripts/check-public-safety.mjs --history",
     "verify:package": "npm run build && node scripts/verify-package.mjs",

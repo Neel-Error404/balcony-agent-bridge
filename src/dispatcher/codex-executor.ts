@@ -13,6 +13,8 @@ export interface CodexExecutionInput {
   timeoutSeconds: number;
   maxOutputBytes: number;
   abortSignal?: AbortSignal;
+  /** Safe causal identifier for the optional pilot ledger, never a prompt. */
+  requestMessageId?: string;
 }
 
 export interface CodexExecutionResult {
@@ -35,7 +37,16 @@ export class LocalCodexExecutor implements CodexExecutor {
     expectedCodeModeHostSha256: string,
     private readonly trustedPath: string,
     private readonly sourceEnvironment: NodeJS.ProcessEnv = process.env,
+    private readonly executionOptions: {
+      model?: string;
+      /** Pilot-only total captured stdout/stderr bound; legacy limits stay unchanged. */
+      combinedOutputLimit?: boolean;
+    } = {},
   ) {
+    if (executionOptions.model !== undefined &&
+        !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/u.test(executionOptions.model)) {
+      throw new DispatchConfigurationError("The approved Codex model identifier is invalid.");
+    }
     this.executable = requireFile(executable, "Codex executable");
     const codeModeHost = requireFile(
       codeModeHostExecutable,
@@ -112,6 +123,7 @@ export class LocalCodexExecutor implements CodexExecutor {
       "read-only",
       "--color",
       "never",
+      ...(this.executionOptions.model ? ["--model", this.executionOptions.model] : []),
       ...evidenceOnlyArguments,
       "--cd",
       projectPath,
@@ -233,7 +245,8 @@ export class LocalCodexExecutor implements CodexExecutor {
           return;
         }
         stdoutBytes += chunk.byteLength;
-        if (stdoutBytes > input.maxOutputBytes) {
+        if (stdoutBytes + (this.executionOptions.combinedOutputLimit ? stderrBytes : 0) >
+            input.maxOutputBytes) {
           outputExceeded = true;
           requestTermination(
             "CODEX_OUTPUT_INVALID",
@@ -245,11 +258,20 @@ export class LocalCodexExecutor implements CodexExecutor {
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
-        if (stderrBytes >= 8192) {
+        if (settled || outputExceeded || stderrBytes >= 8192) {
           return;
         }
         const remaining = 8192 - stderrBytes;
         const bounded = chunk.subarray(0, remaining);
+        if (this.executionOptions.combinedOutputLimit &&
+            stdoutBytes + stderrBytes + bounded.byteLength > input.maxOutputBytes) {
+          outputExceeded = true;
+          requestTermination(
+            "CODEX_OUTPUT_INVALID",
+            "The read-only Codex worker exceeded its combined output limit.",
+          );
+          return;
+        }
         stderr.push(bounded);
         stderrBytes += bounded.byteLength;
       });

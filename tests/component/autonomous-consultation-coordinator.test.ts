@@ -21,7 +21,7 @@ import {
   type ConsultationEvidenceProvider,
 } from "../../src/coordination/autonomous-consultation-coordinator.js";
 import { BridgeDatabase } from "../../src/storage/database.js";
-import { CodexExecutionError } from "../../src/errors.js";
+import { BridgeError, CodexExecutionError } from "../../src/errors.js";
 
 describe("AutonomousConsultationCoordinator", () => {
   let root: string;
@@ -443,6 +443,38 @@ describe("AutonomousConsultationCoordinator", () => {
     expect(database.getConsultationRun(request.message_id)?.state).toBe("pending_child");
     expect(database.getInboxMessage(request.message_id)?.state).toBe("claimed");
     expect(database.getStatus().outbox.pending).toBe(0);
+  });
+
+  it("settles a pilot budget denial with no successful or nested result", async () => {
+    const request = incomingRequest({ mode: "none" });
+    database.persistIncoming(request, 1, now(0), true);
+    const denied = createCoordinator(new ProjectEvidenceProvider(), {
+      execute: async () => { throw new BridgeError("PILOT_BUDGET_EXHAUSTED", "six launches consumed"); },
+    });
+    expect(await denied.runOnce(now(1))).toBe(1);
+    expect(database.getConsultationRun(request.message_id)?.state).toBe("failed");
+    expect(database.getInboxMessage(request.message_id)?.state).toBe("rejected");
+    expect(database.getStatus().outbox.pending).toBe(1);
+  });
+
+  it("does not publish success when an executor returns just after the root deadline", async () => {
+    const request = incomingRequest({ mode: "none" });
+    database.persistIncoming(request, 1, now(0), true);
+    let current = now(299.5);
+    const bounded = new AutonomousConsultationCoordinator(
+      bridgeConfig(path.join(root, "bridge.sqlite3")), database, registry,
+      {
+        execute: async () => {
+          current = now(300.1);
+          return childResult({ outcome: "completed", answer: "late", evidence_paths: [] });
+        },
+      }, new ProjectEvidenceProvider(), neutralPath,
+      { maxRounds: 2, maxDepth: 1, runTimeoutSeconds: 300, claimLeaseSeconds: 720, maxOutputBytes: 48000 },
+      () => current,
+    );
+    expect(await bounded.runOnce(current)).toBe(1);
+    expect(database.getConsultationRun(request.message_id)?.state).toBe("failed");
+    expect(database.getInboxMessage(request.message_id)?.state).toBe("rejected");
   });
 
   function createCoordinator(

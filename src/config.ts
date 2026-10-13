@@ -208,6 +208,9 @@ export function parseLocalBridgeProfile(value: unknown): LocalBridgeProfile {
 
 const DispatcherEnvironmentSchema = z
   .object({
+    BALCONY_DISPATCHER_PILOT_CONFIG_PATH: z.string().refine(
+      value => path.isAbsolute(value), "Pilot configuration path must be absolute.",
+    ).optional(),
     BALCONY_DISPATCHER_PROJECTS_PATH: z.string().trim().min(1),
     BALCONY_CODEX_EXECUTABLE: z.string().trim().min(1),
     BALCONY_CODEX_EXECUTABLE_SHA256: z
@@ -297,6 +300,7 @@ export interface ReadOnlyDispatcherConfig {
   consultationWorkingDirectory?: string;
   gitExecutable?: string;
   gitExecutableSha256?: string;
+  pilotConfigPath?: string;
 }
 
 export function loadConfig(
@@ -557,6 +561,9 @@ export function loadReadOnlyDispatcherConfig(
         }
       : {}),
     mode: result.data.BALCONY_DISPATCHER_MODE,
+    ...(result.data.BALCONY_DISPATCHER_PILOT_CONFIG_PATH
+      ? { pilotConfigPath: result.data.BALCONY_DISPATCHER_PILOT_CONFIG_PATH }
+      : {}),
     ...(result.data.BALCONY_CONSULTATION_WORKING_DIRECTORY
       ? {
           consultationWorkingDirectory: path.resolve(
